@@ -18,6 +18,10 @@ desktop.ini
 *.swp
 *~
 
+# Rust build artifacts
+target/
+Cargo.lock
+
 # Local temporary files
 tmp/
 scratch/

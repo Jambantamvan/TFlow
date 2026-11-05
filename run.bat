@@ -1,25 +1,35 @@
 @echo off
-title TUF Control Center (Windows)
+title TFlow Hardware and Power Manager
 chcp 65001 >nul
 
-:: Meminta Administrator Privileges otomatis
+:: Request Administrator Privileges
 net session >nul 2>&1
 if %ERRORLEVEL% NEQ 0 (
-    echo Meminta izin Administrator...
+    echo Requesting Administrator privileges...
     powershell -Command "Start-Process -FilePath 'cmd.exe' -ArgumentList '/c \"\"%~f0\"\"' -Verb RunAs"
     exit /b
 )
 
 cd /d "%~dp0"
 
-:: Cek apakah Python terpasang di Windows
-python --version >nul 2>&1
-if %ERRORLEVEL% EQU 0 (
-    echo Membuka antarmuka TUF Control Center...
-    start "" python "%~dp0main.py"
-) else (
-    echo Python tidak terdeteksi di Windows PATH.
-    echo Menjalankan fallback AsusFanControl GUI bawaan...
-    "%~dp0windows_bin\PsExec.exe" -accepteula -i -s -d "%~dp0windows_bin\AsusFanControlGUI.exe"
+if exist "%~dp0target\release\tflow.exe" (
+    echo Starting TFlow v2.0...
+    start "" "%~dp0target\release\tflow.exe"
+    exit /b
 )
 
+if exist "%~dp0tflow.exe" (
+    echo Starting TFlow v2.0...
+    start "" "%~dp0tflow.exe"
+    exit /b
+)
+
+:: Python fallback
+python --version >nul 2>&1
+if %ERRORLEVEL% EQU 0 (
+    echo Starting TFlow via Python backend...
+    start "" python "%~dp0main.py"
+) else (
+    echo Fallback: Launching AsusFanControl hardware monitor...
+    "%~dp0windows_bin\PsExec.exe" -accepteula -i -s -d "%~dp0windows_bin\AsusFanControlGUI.exe"
+)

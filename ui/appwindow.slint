@@ -1,0 +1,490 @@
+import { Button, Slider } from "std-widgets.slint";
+
+component MetricBadge inherits Rectangle {
+    in property <string> label: "";
+    in property <string> value: "";
+    in property <color> value-color: #38bdf8;
+    in property <color> badge-bg: #141720;
+    in property <color> badge-border: #222938;
+
+    background: badge-bg;
+    border-width: 1px;
+    border-color: badge-border;
+    border-radius: 6px;
+    height: 52px;
+
+    VerticalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        padding-top: 6px;
+        padding-bottom: 6px;
+        alignment: center;
+        spacing: 2px;
+
+        Text {
+            text: root.label;
+            font-size: 10px;
+            font-weight: 600;
+            color: #8b9bb4;
+        }
+        Text {
+            text: root.value;
+            font-size: 14px;
+            font-weight: 700;
+            color: root.value-color;
+        }
+    }
+}
+
+component SegmentButton inherits Rectangle {
+    in property <string> text: "";
+    in property <bool> active: false;
+    in property <color> active-color: #38bdf8;
+    callback clicked();
+
+    background: root.active ? #1e293b : #11141c;
+    border-width: 1px;
+    border-color: root.active ? root.active-color : #222938;
+    border-radius: 6px;
+    height: 32px;
+
+    TouchArea {
+        clicked => { root.clicked(); }
+        mouse-cursor: pointer;
+    }
+
+    Text {
+        text: root.text;
+        font-size: 12px;
+        font-weight: root.active ? 700 : 500;
+        color: root.active ? #ffffff : #94a3b8;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
+export component AppWindow inherits Window {
+    title: "TFlow - ASUS Hardware & Power Manager";
+    preferred-width: 460px;
+    preferred-height: 680px;
+    min-width: 440px;
+    min-height: 660px;
+    background: #0b0d13;
+    default-font-family: "Inter, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Ubuntu, sans-serif";
+
+    // Power & Battery Telemetry
+    in-out property <string> power-mode: "Normal";
+    in-out property <string> ac-status: "Plugged In";
+    in-out property <bool> is-ac-online: true;
+    in-out property <string> power-wattage: "14.2 W";
+    in-out property <string> battery-level: "98%";
+    in-out property <float> battery-pct: 0.98;
+    in-out property <string> battery-health: "61.0%";
+    in-out property <string> battery-capacity: "25.1 / 41.1 Ah";
+    in-out property <string> remaining-time: "2h 45m";
+    in-out property <string> full-runtime: "3h 12m";
+    in-out property <int> charge-limit: 80;
+
+    // Thermals & Fans
+    in-out property <string> cpu-temp: "57°C";
+    in-out property <string> gpu-temp: "46°C";
+    in-out property <string> cpu-fan: "2400 RPM";
+    in-out property <string> gpu-fan: "2200 RPM";
+    in-out property <string> fan-mode: "Auto";
+    in-out property <float> manual-fan-duty: 50.0;
+
+    // Callbacks
+    callback set-power-mode(string);
+    callback set-charge-limit(int);
+    callback set-fan-mode(string);
+    callback set-manual-duty(float);
+    callback refresh-telemetry();
+
+    VerticalLayout {
+        padding-left: 16px;
+        padding-right: 16px;
+        padding-top: 14px;
+        padding-bottom: 14px;
+        spacing: 12px;
+
+        // Header
+        HorizontalLayout {
+            spacing: 8px;
+            alignment: space-between;
+
+            VerticalLayout {
+                spacing: 1px;
+                HorizontalLayout {
+                    spacing: 6px;
+                    Text {
+                        text: "TFlow";
+                        font-size: 18px;
+                        font-weight: 800;
+                        color: #ffffff;
+                    }
+                    Rectangle {
+                        background: #1e293b;
+                        border-radius: 4px;
+                        height: 18px;
+                        y: 3px;
+                        HorizontalLayout {
+                            padding-left: 6px;
+                            padding-right: 6px;
+                            alignment: center;
+                            Text {
+                                text: "v2.0";
+                                font-size: 10px;
+                                font-weight: 700;
+                                color: #38bdf8;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                }
+                Text {
+                    text: "ASUS TUF Gaming FX506LH Telemetry";
+                    font-size: 10px;
+                    color: #64748b;
+                }
+            }
+
+            HorizontalLayout {
+                spacing: 6px;
+                alignment: end;
+
+                // AC Status Pill
+                Rectangle {
+                    background: root.is-ac-online ? #064e3b : #3b1806;
+                    border-width: 1px;
+                    border-color: root.is-ac-online ? #059669 : #d97706;
+                    border-radius: 12px;
+                    height: 24px;
+                    y: 4px;
+                    HorizontalLayout {
+                        padding-left: 8px;
+                        padding-right: 8px;
+                        alignment: center;
+                        Text {
+                            text: root.ac-status;
+                            font-size: 11px;
+                            font-weight: 600;
+                            color: root.is-ac-online ? #34d399 : #fbbf24;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+
+                // Wattage Badge
+                Rectangle {
+                    background: #111827;
+                    border-width: 1px;
+                    border-color: #1f2937;
+                    border-radius: 12px;
+                    height: 24px;
+                    y: 4px;
+                    HorizontalLayout {
+                        padding-left: 8px;
+                        padding-right: 8px;
+                        alignment: center;
+                        Text {
+                            text: root.power-wattage;
+                            font-size: 11px;
+                            font-weight: 700;
+                            color: #f1f5f9;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Section 1: Power & Battery Mode Selector
+        Rectangle {
+            background: #12151e;
+            border-width: 1px;
+            border-color: #1e2433;
+            border-radius: 8px;
+
+            VerticalLayout {
+                padding: 12px;
+                spacing: 8px;
+
+                HorizontalLayout {
+                    Text {
+                        text: "POWER & BATTERY PROFILE";
+                        font-size: 10px;
+                        font-weight: 700;
+                        color: #94a3b8;
+                    }
+                    Text {
+                        text: "Active: " + root.power-mode;
+                        font-size: 10px;
+                        font-weight: 600;
+                        color: #38bdf8;
+                        horizontal-alignment: end;
+                    }
+                }
+
+                HorizontalLayout {
+                    spacing: 6px;
+                    SegmentButton {
+                        text: "Normal (Balanced)";
+                        active: root.power-mode == "Normal";
+                        active-color: #38bdf8;
+                        clicked => { root.set-power-mode("Normal"); }
+                    }
+                    SegmentButton {
+                        text: "Power Saver (Eco)";
+                        active: root.power-mode == "PowerSaver";
+                        active-color: #10b981;
+                        clicked => { root.set-power-mode("PowerSaver"); }
+                    }
+                    SegmentButton {
+                        text: "Ultra Saver";
+                        active: root.power-mode == "UltraSaver";
+                        active-color: #f59e0b;
+                        clicked => { root.set-power-mode("UltraSaver"); }
+                    }
+                }
+
+                Text {
+                    text: root.power-mode == "Normal" ? "Balanced PL1 25W/PL2 35W, dynamic turbo boost, standard governor." :
+                          root.power-mode == "PowerSaver" ? "Energy saving PL1 15W, turbo boost disabled, low-power CPU governor." :
+                          "Deep battery clamping PL1 10W, max clock capped to 50%, dGPU sleep.";
+                    font-size: 10px;
+                    color: #64748b;
+                }
+            }
+        }
+
+        // Section 2: Battery Health & Telemetry
+        Rectangle {
+            background: #12151e;
+            border-width: 1px;
+            border-color: #1e2433;
+            border-radius: 8px;
+
+            VerticalLayout {
+                padding: 12px;
+                spacing: 10px;
+
+                Text {
+                    text: "BATTERY TELEMETRY & HEALTH";
+                    font-size: 10px;
+                    font-weight: 700;
+                    color: #94a3b8;
+                }
+
+                // Grid 1: Battery Level & Health
+                HorizontalLayout {
+                    spacing: 8px;
+                    MetricBadge {
+                        label: "BATTERY CHARGE";
+                        value: root.battery-level;
+                        value-color: root.battery-pct > 0.3 ? #38bdf8 : #ef4444;
+                    }
+                    MetricBadge {
+                        label: "BATTERY HEALTH";
+                        value: root.battery-health;
+                        value-color: #10b981;
+                    }
+                    MetricBadge {
+                        label: "DISCHARGE / CHARGE";
+                        value: root.power-wattage;
+                        value-color: root.is-ac-online ? #10b981 : #f59e0b;
+                    }
+                }
+
+                // Grid 2: Runtime Predictions
+                HorizontalLayout {
+                    spacing: 8px;
+                    MetricBadge {
+                        label: "REMAINING RUNTIME";
+                        value: root.remaining-time;
+                        value-color: #e2e8f0;
+                    }
+                    MetricBadge {
+                        label: "FULL BATTERY RUNTIME";
+                        value: root.full-runtime;
+                        value-color: #a5b4fc;
+                    }
+                }
+
+                // Battery Care Charge Limit
+                VerticalLayout {
+                    spacing: 6px;
+                    HorizontalLayout {
+                        Text {
+                            text: "Battery Care Charge Limit:";
+                            font-size: 11px;
+                            font-weight: 600;
+                            color: #cbd5e1;
+                        }
+                        Text {
+                            text: root.charge-limit + "% Max";
+                            font-size: 11px;
+                            font-weight: 700;
+                            color: #38bdf8;
+                            horizontal-alignment: end;
+                        }
+                    }
+
+                    HorizontalLayout {
+                        spacing: 6px;
+                        SegmentButton {
+                            text: "60% (Desktop)";
+                            active: root.charge-limit == 60;
+                            active-color: #38bdf8;
+                            clicked => { root.set-charge-limit(60); }
+                        }
+                        SegmentButton {
+                            text: "80% (Balanced)";
+                            active: root.charge-limit == 80;
+                            active-color: #10b981;
+                            clicked => { root.set-charge-limit(80); }
+                        }
+                        SegmentButton {
+                            text: "100% (Maximum)";
+                            active: root.charge-limit == 100;
+                            active-color: #f59e0b;
+                            clicked => { root.set-charge-limit(100); }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Section 3: Thermals & Fan Management
+        Rectangle {
+            background: #12151e;
+            border-width: 1px;
+            border-color: #1e2433;
+            border-radius: 8px;
+
+            VerticalLayout {
+                padding: 12px;
+                spacing: 10px;
+
+                Text {
+                    text: "THERMALS & FANS";
+                    font-size: 10px;
+                    font-weight: 700;
+                    color: #94a3b8;
+                }
+
+                // Thermal metrics
+                HorizontalLayout {
+                    spacing: 8px;
+                    MetricBadge {
+                        label: "CPU TEMPERATURE";
+                        value: root.cpu-temp;
+                        value-color: #f87171;
+                    }
+                    MetricBadge {
+                        label: "CPU FAN SPEED";
+                        value: root.cpu-fan;
+                        value-color: #38bdf8;
+                    }
+                    MetricBadge {
+                        label: "GPU TEMPERATURE";
+                        value: root.gpu-temp;
+                        value-color: #34d399;
+                    }
+                    MetricBadge {
+                        label: "GPU FAN SPEED";
+                        value: root.gpu-fan;
+                        value-color: #38bdf8;
+                    }
+                }
+
+                // Fan Mode Selector
+                HorizontalLayout {
+                    spacing: 6px;
+                    SegmentButton {
+                        text: "Auto";
+                        active: root.fan-mode == "Auto";
+                        active-color: #38bdf8;
+                        clicked => { root.set-fan-mode("Auto"); }
+                    }
+                    SegmentButton {
+                        text: "Silent";
+                        active: root.fan-mode == "Silent";
+                        active-color: #10b981;
+                        clicked => { root.set-fan-mode("Silent"); }
+                    }
+                    SegmentButton {
+                        text: "Turbo";
+                        active: root.fan-mode == "Turbo";
+                        active-color: #f59e0b;
+                        clicked => { root.set-fan-mode("Turbo"); }
+                    }
+                    SegmentButton {
+                        text: "100% Max";
+                        active: root.fan-mode == "Max";
+                        active-color: #ef4444;
+                        clicked => { root.set-fan-mode("Max"); }
+                    }
+                    SegmentButton {
+                        text: "Manual";
+                        active: root.fan-mode == "Manual";
+                        active-color: #c084fc;
+                        clicked => { root.set-fan-mode("Manual"); }
+                    }
+                }
+
+                // Manual Duty Slider (shown when manual mode is selected)
+                if root.fan-mode == "Manual" : VerticalLayout {
+                    spacing: 4px;
+                    HorizontalLayout {
+                        Text {
+                            text: "Manual Duty Cycle:";
+                            font-size: 11px;
+                            color: #cbd5e1;
+                        }
+                        Text {
+                            text: Math.round(root.manual-fan-duty) + "%";
+                            font-size: 11px;
+                            font-weight: 700;
+                            color: #c084fc;
+                            horizontal-alignment: end;
+                        }
+                    }
+                    Slider {
+                        minimum: 20.0;
+                        maximum: 100.0;
+                        value: root.manual-fan-duty;
+                        changed(val) => { root.set-manual-duty(val); }
+                    }
+                }
+            }
+        }
+
+        // Footer / EC Diagnostics
+        Rectangle {
+            background: #0d1017;
+            border-radius: 6px;
+            height: 28px;
+            HorizontalLayout {
+                padding-left: 10px;
+                padding-right: 10px;
+                alignment: space-between;
+
+                Text {
+                    text: "EC Controller: Active (Ports 0x25C/0x25D)";
+                    font-size: 10px;
+                    font-weight: 500;
+                    color: #475569;
+                    vertical-alignment: center;
+                }
+                Text {
+                    text: "Linux RAPL + asus-nb-wmi";
+                    font-size: 10px;
+                    font-weight: 500;
+                    color: #475569;
+                    vertical-alignment: center;
+                    horizontal-alignment: end;
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,27 @@
+[package]
+name = "tflow"
+version = "2.0.0"
+edition = "2021"
+authors = ["Jambantamvan <Jambantamvan@users.noreply.github.com>"]
+description = "High-performance hardware, power, thermal, and battery management center for ASUS TUF gaming laptops"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/Jambantamvan/TFlow"
+keywords = ["asus", "tuf", "fan-control", "battery", "power-management"]
+
+[dependencies]
+slint = { version = "1.18" }
+clap = { version = "4.5", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+chrono = "0.4"
+
+[build-dependencies]
+slint-build = "1.18"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+

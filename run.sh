@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
-# TUF Control Center - Linux Launcher
+# TFlow - Linux Launcher
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$DIR"
-python3 "$DIR/main.py" "$@"
 
+if [ -f "$DIR/target/release/tflow" ]; then
+    exec "$DIR/target/release/tflow" "$@"
+elif command -v tflow &>/dev/null; then
+    exec tflow "$@"
+else
+    cargo run --release -- "$@"
+fi

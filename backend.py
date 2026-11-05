@@ -119,16 +119,64 @@ class HardwareBackend:
                 subprocess.run([self.ec_tool, "setp", str(percent), "--fan", "1", "--no-verify"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         else:
             # Windows: Uses AsusFanControl.exe --set-fan-speeds=N
+            cflags = 0x08000000 if IS_WINDOWS else 0
             try:
                 cmd = [self.psexec_exe, "-accepteula", "-s", self.afc_exe, f"--set-fan-speeds={percent}"]
-                subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=cflags)
             except Exception:
                 try:
-                    subprocess.run([self.afc_exe, f"--set-fan-speeds={percent}"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    subprocess.run([self.afc_exe, f"--set-fan-speeds={percent}"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=cflags)
                 except Exception:
                     pass
 
-    # ------------------ BATTERY TELEMETRY ------------------
+    # ------------------ BATTERY TELEMETRY & CARE ------------------
+
+    def set_charge_threshold(self, limit: int):
+        """Set hardware battery charge limit (60%, 80%, or 100%)."""
+        limit = 60 if limit <= 60 else (80 if limit <= 80 else 100)
+        if IS_LINUX:
+            thresh_path = "/sys/class/power_supply/BAT1/charge_control_end_threshold"
+            self._write_sysfs(thresh_path, str(limit))
+        else:
+            try:
+                cmd = [
+                    "reg", "add",
+                    r"HKLM\SOFTWARE\ASUS\ASUS System Control Interface\AsusOptimization\ASUSLink",
+                    "/v", "BatteryHealthCharging",
+                    "/t", "REG_DWORD",
+                    "/d", str(limit),
+                    "/f"
+                ]
+                subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=0x08000000 if IS_WINDOWS else 0)
+            except Exception:
+                pass
+
+    def get_charge_threshold(self) -> int:
+        """Read hardware battery charge limit (returns 60, 80, or 100)."""
+        if IS_LINUX:
+            thresh_path = "/sys/class/power_supply/BAT1/charge_control_end_threshold"
+            try:
+                with open(thresh_path, "r") as f:
+                    return int(f.read().strip())
+            except Exception:
+                return 80
+        else:
+            try:
+                cmd = [
+                    "reg", "query",
+                    r"HKLM\SOFTWARE\ASUS\ASUS System Control Interface\AsusOptimization\ASUSLink",
+                    "/v", "BatteryHealthCharging"
+                ]
+                res = subprocess.run(cmd, capture_output=True, text=True, timeout=2, creationflags=0x08000000 if IS_WINDOWS else 0)
+                if res.returncode == 0:
+                    for line in res.stdout.splitlines():
+                        if "BatteryHealthCharging" in line:
+                            parts = line.split()
+                            val_str = parts[-1]
+                            return int(val_str, 16) if val_str.startswith("0x") else int(val_str)
+            except Exception:
+                pass
+            return 80
 
     def get_battery_telemetry(self):
         """Returns dict with capacity_pct, health_pct, power_w, remaining_time, full_runtime, is_ac"""
@@ -181,37 +229,40 @@ class HardwareBackend:
                 "is_ac": is_ac
             }
         else:
-            # Windows: Query via PowerShell Get-CimInstance Win32_Battery
+            # Windows: Instantaneous via Win32 GetSystemPowerStatus (0 ms overhead)
+            is_ac = True
+            capacity_pct = 100
+            rem_str = "Connected (AC)"
             try:
-                ps_cmd = 'Get-CimInstance Win32_Battery | Select-Object EstimatedChargeRemaining, BatteryStatus, EstimatedRunTime, DesignCapacity, FullChargeCapacity | ConvertTo-Json'
-                res = subprocess.run(["powershell", "-NoProfile", "-Command", ps_cmd], capture_output=True, text=True, timeout=3)
-                if res.returncode == 0 and res.stdout.strip():
-                    data = json.loads(res.stdout.strip())
-                    cap = int(data.get("EstimatedChargeRemaining", 100))
-                    design = float(data.get("DesignCapacity", 1) or 1)
-                    full = float(data.get("FullChargeCapacity", 1) or 1)
-                    health = min(100.0, (full / design) * 100.0) if design > 0 else 60.9
-                    est_mins = int(data.get("EstimatedRunTime", 0) or 0)
-                    is_ac = int(data.get("BatteryStatus", 2)) == 2 # 2 = Normal/AC
-                    rem_str = "Connected (AC)" if is_ac else f"{est_mins // 60}h {est_mins % 60}m"
-                    return {
-                        "capacity_pct": cap,
-                        "health_pct": round(health, 1),
-                        "power_w": 0.0 if is_ac else 14.5,
-                        "remaining_time": rem_str,
-                        "full_runtime": "2h 30m",
-                        "is_ac": is_ac
-                    }
+                import ctypes
+                from ctypes import wintypes
+                class SPS(ctypes.Structure):
+                    _fields_ = [
+                        ('ACLineStatus', wintypes.BYTE),
+                        ('BatteryFlag', wintypes.BYTE),
+                        ('BatteryLifePercent', wintypes.BYTE),
+                        ('Reserved', wintypes.BYTE),
+                        ('BatteryLifeTime', wintypes.DWORD),
+                        ('BatteryFullLifeTime', wintypes.DWORD),
+                    ]
+                sps = SPS()
+                if ctypes.windll.kernel32.GetSystemPowerStatus(ctypes.byref(sps)):
+                    is_ac = (sps.ACLineStatus == 1)
+                    if sps.BatteryLifePercent <= 100:
+                        capacity_pct = int(sps.BatteryLifePercent)
+                    if not is_ac and sps.BatteryLifeTime != 0xFFFFFFFF:
+                        mins = sps.BatteryLifeTime // 60
+                        rem_str = f"{mins // 60}h {mins % 60}m"
             except Exception:
                 pass
 
             return {
-                "capacity_pct": 100,
+                "capacity_pct": capacity_pct,
                 "health_pct": 60.9,
-                "power_w": 0.0,
-                "remaining_time": "Connected (AC)",
+                "power_w": 0.0 if is_ac else 13.8,
+                "remaining_time": rem_str,
                 "full_runtime": "2h 15m",
-                "is_ac": True
+                "is_ac": is_ac
             }
 
     # ------------------ POWER PROFILES ------------------
@@ -251,12 +302,14 @@ class HardwareBackend:
                 self._write_sysfs("/sys/devices/system/cpu/intel_pstate/max_perf_pct", "100")
         else:
             # Windows Power Schemes via powercfg
+            cflags = 0x08000000 if IS_WINDOWS else 0
             guid_sub = "54533251-82be-4824-96c1-47b60b740d00"
             guid_setting = "be337238-0d82-4146-a960-4f3749d470c7"
-            if profile == "UltraSave":
+            p_lower = profile.lower()
+            if "ultra" in p_lower or "silent" in p_lower or "saver" in p_lower:
                 scheme = "a1841308-3541-4fab-bc81-f71556f20b4a" # Power Saver
                 boost_idx = "0" # Disable CPU Boost
-            elif profile == "Performance":
+            elif "perf" in p_lower or "turbo" in p_lower or "high" in p_lower:
                 scheme = "8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c" # High Performance
                 boost_idx = "2" # Aggressive Boost
             else:
@@ -264,11 +317,35 @@ class HardwareBackend:
                 boost_idx = "4" # Dynamic Boost
 
             try:
-                subprocess.run(["powercfg", "/setactive", scheme], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                subprocess.run(["powercfg", "/setacvalueindex", "SCHEME_CURRENT", guid_sub, guid_setting, boost_idx], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                subprocess.run(["powercfg", "/setactive", "SCHEME_CURRENT"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                subprocess.run(["powercfg", "/setactive", scheme], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=cflags)
+                subprocess.run(["powercfg", "/setacvalueindex", "SCHEME_CURRENT", guid_sub, guid_setting, boost_idx], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=cflags)
+                subprocess.run(["powercfg", "/setactive", "SCHEME_CURRENT"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=cflags)
             except Exception:
                 pass
+
+    def get_power_profile(self) -> str:
+        if IS_LINUX:
+            try:
+                with open("/sys/firmware/acpi/platform_profile", "r") as f:
+                    v = f.read().strip().lower()
+                    if "quiet" in v: return "UltraSave"
+                    elif "performance" in v: return "Performance"
+                    else: return "Balance"
+            except Exception:
+                return "Balance"
+        else:
+            try:
+                cflags = 0x08000000 if IS_WINDOWS else 0
+                res = subprocess.run(["powercfg", "/getactivescheme"], capture_output=True, text=True, timeout=2, creationflags=cflags)
+                out = res.stdout.lower()
+                if "a1841308" in out:
+                    return "UltraSave"
+                elif "8c5e7fda" in out:
+                    return "Performance"
+                else:
+                    return "Balance"
+            except Exception:
+                return "Balance"
 
     def _write_sysfs(self, path: str, value: str):
         if not os.path.exists(path):

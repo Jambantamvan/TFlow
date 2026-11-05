@@ -35,12 +35,16 @@ class TFlowApp:
         self.backend = HardwareBackend()
         self.running = True
 
-        self.power_mode = "Balance"
+        self.power_mode = self.backend.get_power_profile()
         self.fan_mode = "Auto"
-        self.charge_limit = 80
+        self.charge_limit = self.backend.get_charge_threshold()
+
+        self._slider_debounce_timer = None
+        self._pending_fan_duty = None
 
         self._setup_styles()
         self._build_ui()
+        self._apply_initial_state()
 
         # Start live background polling (non-blocking)
         self.poll_thread = threading.Thread(target=self._update_loop, daemon=True)
@@ -314,16 +318,32 @@ class TFlowApp:
 
         threading.Thread(target=apply_fan, daemon=True).start()
 
+    def _apply_initial_state(self):
+        """Apply current system state on launch."""
+        self.set_power(self.power_mode)
+        for b, l in [(self.btn_c60, 60), (self.btn_c80, 80), (self.btn_c100, 100)]:
+            is_act = (l == self.charge_limit)
+            b.config(bg="#1e293b" if is_act else "#11141c", fg=TEXT_WHITE if is_act else TEXT_MUTED)
+
     def set_charge(self, limit):
         self.charge_limit = limit
         for b, l in [(self.btn_c60, 60), (self.btn_c80, 80), (self.btn_c100, 100)]:
             is_act = l == limit
             b.config(bg="#1e293b" if is_act else "#11141c", fg=TEXT_WHITE if is_act else TEXT_MUTED)
+        threading.Thread(target=lambda: self.backend.set_charge_threshold(limit), daemon=True).start()
 
     def _on_slider_change(self, val):
         duty = int(float(val))
         self.slider_val_lbl.config(text=f"{duty}%")
-        threading.Thread(target=lambda: self.backend.set_fan_speed(duty), daemon=True).start()
+        self._pending_fan_duty = duty
+        if self._slider_debounce_timer is not None:
+            self.root.after_cancel(self._slider_debounce_timer)
+        self._slider_debounce_timer = self.root.after(150, self._apply_debounced_slider)
+
+    def _apply_debounced_slider(self):
+        if self._pending_fan_duty is not None:
+            duty = self._pending_fan_duty
+            threading.Thread(target=lambda: self.backend.set_fan_speed(duty), daemon=True).start()
 
     def _update_loop(self):
         while self.running:

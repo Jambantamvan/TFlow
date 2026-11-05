@@ -165,7 +165,11 @@ fn read_linux_thermals() -> ThermalTelemetry {
         gpu_fan_rpm = cpu_fan_rpm;
     }
 
-    // Read current thermal policy (0=Standard, 1=Silent, 2=Turbo)
+    // Read current thermal policy:
+    // NOTE: On ASUS TUF FX506 / FX505 (asus-nb-wmi):
+    // 0 = Normal / Balanced
+    // 1 = Turbo / Overboost / Performance
+    // 2 = Silent / Quiet
     let policy = fs::read_to_string("/sys/devices/platform/asus-nb-wmi/throttle_thermal_policy")
         .map(|s| s.trim().to_string())
         .unwrap_or_else(|_| "0".to_string());
@@ -180,9 +184,9 @@ fn read_linux_thermals() -> ThermalTelemetry {
         }
     } else {
         match policy.as_str() {
-            "1" => "Silent".to_string(),
-            "2" => "Turbo".to_string(),
-            _ => "Auto".to_string(),
+            "2" => "Silent".to_string(), // TUF: 2 is Silent
+            "1" => "Turbo".to_string(),  // TUF: 1 is Turbo/Overboost
+            _ => "Auto".to_string(),     // TUF: 0 is Auto/Balanced
         }
     };
 
@@ -217,32 +221,34 @@ pub fn set_fan_profile(profile: &str, manual_duty_pct: Option<u8>) -> Result<(),
         let pwm_path = "/sys/devices/platform/asus-nb-wmi/hwmon/hwmon8/pwm1";
         let ec_tool = get_ec_tool_path();
 
+        // TUF FX506 policy mapping:
+        // 0 = Balanced, 1 = Turbo/Overboost, 2 = Silent/Quiet
         match profile.to_lowercase().as_str() {
-            "auto" | "default" => {
+            "auto" | "default" | "balance" => {
                 let _ = fs::write(pwm_enable_path, "2");
                 let _ = fs::write(policy_path, "0");
                 let _ = fs::write(boost_path, "0");
                 let _ = Command::new("asusctl").args(["profile", "set", "Balanced"]).output();
                 let _ = Command::new(ec_tool).args(["set", "-1"]).output();
             }
-            "silent" | "eco" => {
+            "silent" | "quiet" | "eco" => {
                 let _ = fs::write(pwm_enable_path, "2");
-                let _ = fs::write(policy_path, "1");
-                let _ = fs::write(boost_path, "2");
+                let _ = fs::write(policy_path, "2"); // 2 is Silent on ASUS TUF
+                let _ = fs::write(boost_path, "2"); // 2 is Silent on ASUS TUF
                 let _ = Command::new("asusctl").args(["profile", "set", "Quiet"]).output();
                 let _ = Command::new(ec_tool).args(["set", "-1"]).output();
             }
             "turbo" | "performance" => {
                 let _ = fs::write(pwm_enable_path, "2");
-                let _ = fs::write(policy_path, "2");
-                let _ = fs::write(boost_path, "1"); // Overboost
+                let _ = fs::write(policy_path, "1"); // 1 is Turbo on ASUS TUF
+                let _ = fs::write(boost_path, "1"); // 1 is Overboost on ASUS TUF
                 let _ = Command::new("asusctl").args(["profile", "set", "Performance"]).output();
                 let _ = Command::new(ec_tool).args(["set", "-1"]).output();
             }
             "max" | "100" | "100% max" => {
                 // 1. Activate ASUS Overboost & Performance profile
                 let _ = fs::write(boost_path, "1");
-                let _ = fs::write(policy_path, "2");
+                let _ = fs::write(policy_path, "1");
                 let _ = Command::new("asusctl").args(["profile", "set", "Performance"]).output();
                 // 2. Sysfs PWM to 255
                 let _ = fs::write(pwm_enable_path, "1");
@@ -258,7 +264,7 @@ pub fn set_fan_profile(profile: &str, manual_duty_pct: Option<u8>) -> Result<(),
                 let _ = fs::write(pwm_path, raw_pwm.to_string());
                 if duty_pct >= 85 {
                     let _ = fs::write(boost_path, "1");
-                    let _ = fs::write(policy_path, "2");
+                    let _ = fs::write(policy_path, "1");
                 }
                 let _ = Command::new(ec_tool).args(["setp", &duty_pct.to_string(), "--fan", "0", "--no-verify"]).output();
                 let _ = Command::new(ec_tool).args(["setp", &duty_pct.to_string(), "--fan", "1", "--no-verify"]).output();

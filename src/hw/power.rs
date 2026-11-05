@@ -45,14 +45,18 @@ pub fn apply_power_mode(mode: PowerMode) -> Result<(), String> {
 
 #[cfg(target_os = "linux")]
 fn apply_linux_power_mode(mode: PowerMode) -> Result<(), String> {
-    let (pl1_uw, pl2_uw, no_turbo, max_perf, epp, thermal_policy) = match mode {
+    // ASUS TUF FX506 policy mapping:
+    // 0 = Balanced, 1 = Turbo/Overboost, 2 = Silent/Quiet
+    let (pl1_uw, pl2_uw, no_turbo, max_perf, epp, thermal_policy, boost_mode, asus_profile) = match mode {
         PowerMode::UltraSave => (
             10_000_000, // 10W deep battery clamp
             12_000_000, // 12W burst cap
             "1",        // Turbo disabled to prevent battery drain spikes
             "50",       // 50% max clock speed (~800MHz - 1.2GHz)
             "power",    // Energy performance preference: maximum power savings
-            "1",        // ASUS Silent policy
+            "2",        // ASUS TUF: 2 is Silent policy
+            "2",        // ASUS TUF: 2 is Silent fan boost
+            "Quiet",
         ),
         PowerMode::Balance => (
             28_000_000, // 28W balanced sustained limit
@@ -60,7 +64,9 @@ fn apply_linux_power_mode(mode: PowerMode) -> Result<(), String> {
             "0",        // Turbo enabled
             "100",      // 100% clock speed
             "balance_performance",
-            "0",        // ASUS Standard policy
+            "0",        // ASUS TUF: 0 is Balanced policy
+            "0",        // ASUS TUF: 0 is Normal fan boost
+            "Balanced",
         ),
         PowerMode::Performance => (
             45_000_000, // 45W max sustained TDP for Intel Core i5-10300H
@@ -68,7 +74,9 @@ fn apply_linux_power_mode(mode: PowerMode) -> Result<(), String> {
             "0",        // Full Turbo Boost up to 4.50 GHz
             "100",      // 100% full scale
             "performance", // Immediate ramp, lowest latency
-            "2",        // ASUS Turbo / Overboost policy
+            "1",        // ASUS TUF: 1 is Turbo / Overboost policy
+            "1",        // ASUS TUF: 1 is Overboost fan boost
+            "Performance",
         ),
     };
 
@@ -95,15 +103,17 @@ fn apply_linux_power_mode(mode: PowerMode) -> Result<(), String> {
         }
     }
 
-    // 4. ASUS ACPI Thermal Policy (0=Standard, 1=Silent, 2=Overboost)
+    // 4. ASUS ACPI Thermal Policy & Fan Boost Mode (0=Standard, 1=Turbo, 2=Silent on TUF)
     let asus_policy_path = "/sys/devices/platform/asus-nb-wmi/throttle_thermal_policy";
+    let asus_boost_path = "/sys/devices/platform/asus-nb-wmi/fan_boost_mode";
     let _ = fs::write(asus_policy_path, thermal_policy);
+    let _ = fs::write(asus_boost_path, boost_mode);
+    let _ = Command::new("asusctl").args(["profile", "set", asus_profile]).output();
 
     // 5. NVIDIA GPU Power Optimization
     use std::process::Stdio;
     match mode {
         PowerMode::UltraSave => {
-            // Clamp GPU clock to minimal base (300 MHz) so apps don't wake dGPU to 1.7 GHz
             let _ = Command::new("nvidia-smi")
                 .args(["-lgc", "300,300"])
                 .stdout(Stdio::null())
@@ -111,7 +121,6 @@ fn apply_linux_power_mode(mode: PowerMode) -> Result<(), String> {
                 .status();
         }
         PowerMode::Balance => {
-            // Reset GPU clocks to normal dynamic frequency range
             let _ = Command::new("nvidia-smi")
                 .args(["-rgc"])
                 .stdout(Stdio::null())
@@ -119,7 +128,6 @@ fn apply_linux_power_mode(mode: PowerMode) -> Result<(), String> {
                 .status();
         }
         PowerMode::Performance => {
-            // Reset GPU clocks and enable persistence mode for zero-latency boost
             let _ = Command::new("nvidia-smi")
                 .args(["-rgc"])
                 .stdout(Stdio::null())
@@ -172,7 +180,8 @@ pub fn get_current_power_mode() -> PowerMode {
 
         if (turbo_disabled && max_perf <= 60) || pl1 <= 15_000_000 {
             PowerMode::UltraSave
-        } else if policy == "2" || pl1 >= 40_000_000 {
+        } else if policy == "1" || pl1 >= 40_000_000 {
+            // On TUF FX506: 1 is Turbo/Overboost
             PowerMode::Performance
         } else {
             PowerMode::Balance

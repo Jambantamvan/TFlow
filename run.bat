@@ -8,12 +8,12 @@ cd /d "%~dp0"
 :: Automatically register Windows Start Menu and Desktop shortcuts if missing
 if not exist "%APPDATA%\Microsoft\Windows\Start Menu\Programs\TFlow.lnk" (
     echo Registering Start Menu shortcut for Windows Search...
-    powershell -NoProfile -ExecutionPolicy Bypass -Command "$ws=New-Object -ComObject WScript.Shell; $s=$ws.CreateShortcut([System.IO.Path]::Combine($env:APPDATA, 'Microsoft\Windows\Start Menu\Programs\TFlow.lnk')); $s.TargetPath='%~dp0run.bat'; $s.WorkingDirectory='%~dp0'; $s.Description='TFlow Hardware and Power Manager'; $s.Save()" 2>nul
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "$ws=New-Object -ComObject WScript.Shell; $s=$ws.CreateShortcut('%APPDATA%\Microsoft\Windows\Start Menu\Programs\TFlow.lnk'); $s.TargetPath='%~dp0run.bat'; $s.WorkingDirectory='%~dp0'; $s.Description='TFlow Hardware and Power Manager'; $s.Save()" 2>nul
 )
 
 if not exist "%USERPROFILE%\Desktop\TFlow.lnk" (
     echo Registering Desktop shortcut...
-    powershell -NoProfile -ExecutionPolicy Bypass -Command "$ws=New-Object -ComObject WScript.Shell; $s=$ws.CreateShortcut([System.IO.Path]::Combine($env:USERPROFILE, 'Desktop\TFlow.lnk')); $s.TargetPath='%~dp0run.bat'; $s.WorkingDirectory='%~dp0'; $s.Description='TFlow Hardware and Power Manager'; $s.Save()" 2>nul
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "$ws=New-Object -ComObject WScript.Shell; $s=$ws.CreateShortcut('%USERPROFILE%\Desktop\TFlow.lnk'); $s.TargetPath='%~dp0run.bat'; $s.WorkingDirectory='%~dp0'; $s.Description='TFlow Hardware and Power Manager'; $s.Save()" 2>nul
 )
 
 :: Request Administrator Privileges (needed for ASUS EC and Powercfg)

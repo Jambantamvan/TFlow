@@ -21,6 +21,9 @@ class HardwareBackend:
     def __init__(self):
         self.os_type = "Windows" if IS_WINDOWS else "Linux"
         self._init_paths()
+        # Telemetry cache for Windows to provide instant, responsive UI updates
+        self._last_telemetry_time = 0
+        self._cached_telemetry = None
 
     def _init_paths(self):
         if IS_LINUX:
@@ -63,6 +66,48 @@ class HardwareBackend:
                 startupinfo=startupinfo
             )
 
+    # ------------------ TELEMETRY (WINDOWS BATCH CACHE) ------------------
+
+    def _query_windows_telemetry_batch(self):
+        """Query unified WMI metrics in one single fast PowerShell execution (< 0.8s)."""
+        import time
+        now = time.time()
+        if self._cached_telemetry and (now - self._last_telemetry_time < 1.0):
+            return self._cached_telemetry
+
+        script_path = os.path.join(PROJECT_DIR, "telemetry.ps1")
+        if os.path.exists(script_path):
+            cmd = ["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", script_path]
+        else:
+            ps = (
+                "$tz = (Get-CimInstance Win32_PerfFormattedData_Counters_ThermalZoneInformation -ErrorAction SilentlyContinue | Select-Object -First 1).HighPrecisionTemperature;"
+                "$b = Get-CimInstance -Namespace root/wmi -ClassName BatteryStatus -ErrorAction SilentlyContinue | Select-Object -First 1;"
+                "$f = Get-CimInstance -Namespace root/wmi -ClassName BatteryFullChargedCapacity -ErrorAction SilentlyContinue | Select-Object -First 1;"
+                "$res = @{"
+                "  CpuTemp = if ($tz) { [math]::Round(($tz - 2732) / 10, 1) } else { 0 };"
+                "  FullCharged = if ($f) { $f.FullChargedCapacity } else { 0 };"
+                "  Remaining = if ($b) { $b.RemainingCapacity } else { 0 };"
+                "  Discharge = if ($b) { $b.DischargeRate } else { 0 };"
+                "  Charge = if ($b) { $b.ChargeRate } else { 0 };"
+                "  PowerOnline = if ($b) { $b.PowerOnline } else { $true }"
+                "};"
+                "ConvertTo-Json $res -Compress"
+            )
+            cmd = ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps]
+
+        try:
+            res = self._run_silent(cmd, capture_output=True, timeout=3)
+            out = res.stdout.strip()
+            if out.startswith("{") and out.endswith("}"):
+                data = json.loads(out)
+                self._cached_telemetry = data
+                self._last_telemetry_time = now
+                return data
+        except Exception:
+            pass
+
+        return self._cached_telemetry or {}
+
     # ------------------ THERMAL TELEMETRY ------------------
 
     def get_cpu_temp(self) -> float:
@@ -79,56 +124,21 @@ class HardwareBackend:
                         pass
             return max(temps) if temps else 45.0
         else:
-            # Windows path 1: PsExec -> SYSTEM privilege (best accuracy; works via run.bat admin)
-            try:
-                cmd = [self.psexec_exe, "-accepteula", "-s", self.afc_exe, "--get-cpu-temp"]
-                res = self._run_silent(cmd, capture_output=True, timeout=5)
-                # PsExec may add banner lines; scan ALL lines for a standalone numeric value
-                for line in res.stdout.splitlines():
-                    line = line.strip()
-                    if line.replace(".", "", 1).lstrip("-").isdigit():
-                        t = float(line)
-                        if 10.0 < t < 120.0:
-                            return t
-            except Exception:
-                pass
+            # Windows: First check real-time high-precision ACPI hardware thermal zone counter
+            data = self._query_windows_telemetry_batch()
+            if data and data.get("CpuTemp", 0) > 0:
+                return float(data.get("CpuTemp"))
 
-            # Windows path 2: Direct AsusFanControl without PsExec (may work with admin-only)
+            # Fallback path: Direct AsusFanControl
             try:
                 cmd = [self.afc_exe, "--get-cpu-temp"]
-                res = self._run_silent(cmd, capture_output=True, timeout=3)
+                res = self._run_silent(cmd, capture_output=True, timeout=1)
                 for line in res.stdout.splitlines():
                     line = line.strip()
                     if line.replace(".", "", 1).lstrip("-").isdigit():
                         t = float(line)
                         if 10.0 < t < 120.0:
                             return t
-            except Exception:
-                pass
-
-            # Windows path 3: WMI MSAcpi_ThermalZoneTemperature — last resort.
-            # NOTE: ACPI thermal zones are event-driven and update slowly (not real-time).
-            # They reflect firmware-averaged temps, not individual Intel core Tj.
-            # Only use if above paths both fail.
-            try:
-                ps = (
-                    "try {"
-                    # Filter only zones whose InstanceName contains 'CPU' or 'TZ' (skip ambient/skin sensors)
-                    "$tz = Get-CimInstance -Namespace root/wmi -ClassName MSAcpi_ThermalZoneTemperature -ErrorAction Stop;"
-                    "$vals = $tz | ForEach-Object { ($_.CurrentTemperature - 2732) / 10 };"
-                    "$max = ($vals | Measure-Object -Maximum).Maximum;"
-                    "if ($max -gt 0) { Write-Output ([math]::Round($max,1)) } else { Write-Output '0' }"
-                    "} catch { Write-Output '0' }"
-                )
-                res = self._run_silent(
-                    ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
-                    capture_output=True, timeout=4
-                )
-                val = res.stdout.strip()
-                if val.replace(".", "", 1).lstrip("-").isdigit():
-                    t = float(val)
-                    if 10.0 < t < 120.0:
-                        return t
             except Exception:
                 pass
 
@@ -174,25 +184,25 @@ class HardwareBackend:
             except Exception:
                 return "0", "0", "Auto"
         else:
-            # Windows: Try PsExec (SYSTEM) first, then direct (admin), parse "XXXX, YYYY" digits
+            # Windows: Try reading fan speeds via AsusFanControl
             def _parse_fan_output(text):
                 speeds = [s.strip() for s in re.split(r"[,\s]+", text) if s.strip().isdigit()]
                 return (speeds[0], speeds[1]) if len(speeds) >= 2 else None
 
-            # Attempt 1: PsExec -> SYSTEM privilege (works when launched via run.bat as admin)
+            # Attempt 1: Direct call
             try:
-                cmd = [self.psexec_exe, "-accepteula", "-s", self.afc_exe, "--get-fan-speeds"]
-                res = self._run_silent(cmd, capture_output=True, timeout=5)
+                cmd = [self.afc_exe, "--get-fan-speeds"]
+                res = self._run_silent(cmd, capture_output=True, timeout=1)
                 result = _parse_fan_output(res.stdout)
                 if result:
                     return result[0], result[1], "Auto"
             except Exception:
                 pass
 
-            # Attempt 2: Direct AsusFanControl (sometimes works with admin-only, no SYSTEM)
+            # Attempt 2: PsExec (SYSTEM privilege)
             try:
-                cmd = [self.afc_exe, "--get-fan-speeds"]
-                res = self._run_silent(cmd, capture_output=True, timeout=3)
+                cmd = [self.psexec_exe, "-accepteula", "-s", self.afc_exe, "--get-fan-speeds"]
+                res = self._run_silent(cmd, capture_output=True, timeout=2)
                 result = _parse_fan_output(res.stdout)
                 if result:
                     return result[0], result[1], "Auto"
@@ -350,43 +360,20 @@ class HardwareBackend:
             except Exception:
                 pass
 
-            # --- Step 2: Real WMI BatteryStatus + BatteryFullChargedCapacity (no admin needed) ---
+            # --- Step 2: Real WMI BatteryStatus + BatteryFullChargedCapacity via cache ---
             design_mwh = 48000  # FX506LH spec: 48 Wh = 48000 mWh
             full_mwh = 0
             remaining_mwh = 0
             discharge_mw = 0
             charge_mw = 0
 
-            try:
-                ps = (
-                    "$b = Get-CimInstance -Namespace root/wmi -ClassName BatteryStatus -ErrorAction SilentlyContinue | Select-Object -First 1;"
-                    "$f = Get-CimInstance -Namespace root/wmi -ClassName BatteryFullChargedCapacity -ErrorAction SilentlyContinue | Select-Object -First 1;"
-                    "if ($b -and $f) {"
-                    "  $obj = @{"
-                    "    PowerOnline=$b.PowerOnline;"
-                    "    RemainingCapacity=$b.RemainingCapacity;"
-                    "    DischargeRate=$b.DischargeRate;"
-                    "    ChargeRate=$b.ChargeRate;"
-                    "    Voltage=$b.Voltage;"
-                    "    FullChargedCapacity=$f.FullChargedCapacity"
-                    "  };"
-                    "  ConvertTo-Json $obj -Compress"
-                    "}"
-                )
-                res = self._run_silent(
-                    ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
-                    capture_output=True, timeout=5
-                )
-                if res.returncode == 0 and res.stdout.strip().startswith("{"):
-                    data = json.loads(res.stdout.strip())
-                    full_mwh = int(data.get("FullChargedCapacity", 0))
-                    remaining_mwh = int(data.get("RemainingCapacity", 0))
-                    discharge_mw = int(data.get("DischargeRate", 0))
-                    charge_mw = int(data.get("ChargeRate", 0))
-                    # PowerOnline from WMI is more reliable than ctypes for AC detection
-                    is_ac = bool(data.get("PowerOnline", is_ac))
-            except Exception:
-                pass
+            batch = self._query_windows_telemetry_batch()
+            if batch:
+                full_mwh = int(batch.get("FullCharged", 0))
+                remaining_mwh = int(batch.get("Remaining", 0))
+                discharge_mw = int(batch.get("Discharge", 0))
+                charge_mw = int(batch.get("Charge", 0))
+                is_ac = bool(batch.get("PowerOnline", is_ac))
 
             # --- Step 3: Calculate derived metrics ---
             health_pct = round((full_mwh / design_mwh) * 100.0, 1) if full_mwh > 0 else 0.0

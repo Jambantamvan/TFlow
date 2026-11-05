@@ -152,15 +152,31 @@ class HardwareBackend:
             except Exception:
                 return "0", "0", "Auto"
         else:
-            # Windows: Query AsusFanControl silently
+            # Windows: Try PsExec (SYSTEM) first, then direct (admin), parse "XXXX, YYYY" digits
+            def _parse_fan_output(text):
+                speeds = [s.strip() for s in re.split(r"[,\s]+", text) if s.strip().isdigit()]
+                return (speeds[0], speeds[1]) if len(speeds) >= 2 else None
+
+            # Attempt 1: PsExec -> SYSTEM privilege (works when launched via run.bat as admin)
             try:
-                cmd = [self.afc_exe, "--get-fan-speeds"]
-                res = self._run_silent(cmd, capture_output=True, timeout=2)
-                speeds = [s.strip() for s in res.stdout.split(",") if s.strip().isdigit()]
-                if len(speeds) >= 2:
-                    return speeds[0], speeds[1], "Auto"
+                cmd = [self.psexec_exe, "-accepteula", "-s", self.afc_exe, "--get-fan-speeds"]
+                res = self._run_silent(cmd, capture_output=True, timeout=5)
+                result = _parse_fan_output(res.stdout)
+                if result:
+                    return result[0], result[1], "Auto"
             except Exception:
                 pass
+
+            # Attempt 2: Direct AsusFanControl (sometimes works with admin-only, no SYSTEM)
+            try:
+                cmd = [self.afc_exe, "--get-fan-speeds"]
+                res = self._run_silent(cmd, capture_output=True, timeout=3)
+                result = _parse_fan_output(res.stdout)
+                if result:
+                    return result[0], result[1], "Auto"
+            except Exception:
+                pass
+
             return "0", "0", "Auto"
 
     def set_fan_speed(self, percent: int):

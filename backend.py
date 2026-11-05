@@ -79,27 +79,55 @@ class HardwareBackend:
                         pass
             return max(temps) if temps else 45.0
         else:
-            # Windows: Try AsusFanControl silently
+            # Windows path 1: AsusFanControl.exe --get-cpu-temp (needs SYSTEM via PsExec)
             try:
-                cmd = [self.afc_exe, "--get-cpu-temp"]
-                res = self._run_silent(cmd, capture_output=True, timeout=2)
-                if res.returncode == 0 and res.stdout.strip().replace(".", "", 1).isdigit():
-                    return float(res.stdout.strip())
+                cmd = [self.psexec_exe, "-accepteula", "-s", self.afc_exe, "--get-cpu-temp"]
+                res = self._run_silent(cmd, capture_output=True, timeout=5)
+                val = res.stdout.strip()
+                if res.returncode == 0 and val.replace(".", "", 1).lstrip("-").isdigit():
+                    t = float(val)
+                    if 10.0 < t < 120.0:
+                        return t
             except Exception:
                 pass
-            return 48.0
+            # Windows path 2: WMI MSAcpi_ThermalZoneTemperature (needs admin, works when run.bat elevates)
+            try:
+                ps = (
+                    "try {"
+                    "$tz = Get-CimInstance -Namespace root/wmi -ClassName MSAcpi_ThermalZoneTemperature -ErrorAction Stop;"
+                    "$max = ($tz | ForEach-Object { ($_.CurrentTemperature - 2732) / 10 } | Measure-Object -Maximum).Maximum;"
+                    "Write-Output ([math]::Round($max, 1))"
+                    "} catch { Write-Output '0' }"
+                )
+                res = self._run_silent(
+                    ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
+                    capture_output=True, timeout=4
+                )
+                val = res.stdout.strip()
+                if val.replace(".", "", 1).lstrip("-").isdigit():
+                    t = float(val)
+                    if 10.0 < t < 120.0:
+                        return t
+            except Exception:
+                pass
+            return 0.0  # Indicate unavailable — UI should show "N/A"
 
     def get_gpu_temp(self):
         try:
             cmd = ["nvidia-smi", "--query-gpu=temperature.gpu", "--format=csv,noheader,nounits"]
-            res = self._run_silent(cmd, capture_output=True, timeout=2)
+            res = self._run_silent(cmd, capture_output=True, timeout=3)
             if res.returncode == 0:
                 out = res.stdout.strip()
+                # nvidia-smi returns plain integer e.g. "47"
                 if out.isdigit():
                     return float(out)
+                # Sometimes has extra whitespace or newline — try after strip
+                out_clean = re.sub(r"[^\d]", "", out)
+                if out_clean:
+                    return float(out_clean)
         except Exception:
             pass
-        return 42.0
+        return 0.0  # Indicate unavailable — UI should show "N/A"
 
     # ------------------ FAN CONTROL & RPM ------------------
 
@@ -133,7 +161,7 @@ class HardwareBackend:
                     return speeds[0], speeds[1], "Auto"
             except Exception:
                 pass
-            return "3800", "3750", "Auto"
+            return "0", "0", "Auto"
 
     def set_fan_speed(self, percent: int):
         """Set fan speed (0-100%). percent=0 means return to Auto/EC default."""
@@ -255,10 +283,12 @@ class HardwareBackend:
                 "is_ac": is_ac
             }
         else:
-            # Windows: Instantaneous via Win32 GetSystemPowerStatus (0 ms overhead)
+            # Windows: Combine ctypes (fast AC/%) + WMI BatteryStatus (real power/health)
             is_ac = True
             capacity_pct = 100
             rem_str = "Connected (AC)"
+
+            # --- Step 1: AC status + battery % via ctypes (0 ms, no subprocess) ---
             try:
                 import ctypes
                 from ctypes import wintypes
@@ -276,18 +306,82 @@ class HardwareBackend:
                     is_ac = (sps.ACLineStatus == 1)
                     if sps.BatteryLifePercent <= 100:
                         capacity_pct = int(sps.BatteryLifePercent)
-                    if not is_ac and sps.BatteryLifeTime != 0xFFFFFFFF:
+                    if not is_ac and sps.BatteryLifeTime != 0xFFFFFFFF and sps.BatteryLifeTime > 0:
                         mins = sps.BatteryLifeTime // 60
                         rem_str = f"{mins // 60}h {mins % 60}m"
             except Exception:
                 pass
 
+            # --- Step 2: Real WMI BatteryStatus + BatteryFullChargedCapacity (no admin needed) ---
+            design_mwh = 48000  # FX506LH spec: 48 Wh = 48000 mWh
+            full_mwh = 0
+            remaining_mwh = 0
+            discharge_mw = 0
+            charge_mw = 0
+
+            try:
+                ps = (
+                    "$b = Get-CimInstance -Namespace root/wmi -ClassName BatteryStatus -ErrorAction SilentlyContinue | Select-Object -First 1;"
+                    "$f = Get-CimInstance -Namespace root/wmi -ClassName BatteryFullChargedCapacity -ErrorAction SilentlyContinue | Select-Object -First 1;"
+                    "if ($b -and $f) {"
+                    "  $obj = @{"
+                    "    PowerOnline=$b.PowerOnline;"
+                    "    RemainingCapacity=$b.RemainingCapacity;"
+                    "    DischargeRate=$b.DischargeRate;"
+                    "    ChargeRate=$b.ChargeRate;"
+                    "    Voltage=$b.Voltage;"
+                    "    FullChargedCapacity=$f.FullChargedCapacity"
+                    "  };"
+                    "  ConvertTo-Json $obj -Compress"
+                    "}"
+                )
+                res = self._run_silent(
+                    ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
+                    capture_output=True, timeout=5
+                )
+                if res.returncode == 0 and res.stdout.strip().startswith("{"):
+                    data = json.loads(res.stdout.strip())
+                    full_mwh = int(data.get("FullChargedCapacity", 0))
+                    remaining_mwh = int(data.get("RemainingCapacity", 0))
+                    discharge_mw = int(data.get("DischargeRate", 0))
+                    charge_mw = int(data.get("ChargeRate", 0))
+                    # PowerOnline from WMI is more reliable than ctypes for AC detection
+                    is_ac = bool(data.get("PowerOnline", is_ac))
+            except Exception:
+                pass
+
+            # --- Step 3: Calculate derived metrics ---
+            health_pct = round((full_mwh / design_mwh) * 100.0, 1) if full_mwh > 0 else 0.0
+
+            # Power draw: positive = discharging, negative = charging
+            if is_ac:
+                power_w = round(charge_mw / 1000.0, 1) if charge_mw > 0 else 0.0
+            else:
+                power_w = round(discharge_mw / 1000.0, 1) if discharge_mw > 0 else 0.0
+
+            # Remaining runtime from WMI data (more accurate than ctypes)
+            if not is_ac and discharge_mw > 0 and remaining_mwh > 0:
+                mins = int((remaining_mwh / discharge_mw) * 60)
+                rem_str = f"{mins // 60}h {mins % 60}m"
+            elif is_ac:
+                rem_str = "Connected (AC)"
+
+            # Full battery runtime at current discharge rate
+            full_runtime = "N/A"
+            if discharge_mw > 0 and full_mwh > 0:
+                mins = int((full_mwh / discharge_mw) * 60)
+                full_runtime = f"{mins // 60}h {mins % 60}m"
+            elif full_mwh > 0:
+                # Estimate using typical 15W idle draw
+                mins = int((full_mwh / 15000) * 60)
+                full_runtime = f"~{mins // 60}h {mins % 60}m"
+
             return {
                 "capacity_pct": capacity_pct,
-                "health_pct": 60.9,
-                "power_w": 0.0 if is_ac else 13.8,
+                "health_pct": health_pct,
+                "power_w": power_w,
                 "remaining_time": rem_str,
-                "full_runtime": "2h 15m",
+                "full_runtime": full_runtime,
                 "is_ac": is_ac
             }
 

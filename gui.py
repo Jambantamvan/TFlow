@@ -369,11 +369,18 @@ class TFlowApp:
                     self.badge_rem.val_lbl.config(text=bat["remaining_time"])
                     self.badge_full.val_lbl.config(text=bat["full_runtime"])
 
-                    # Thermals
-                    self.badge_cpu_temp.val_lbl.config(text=f"{int(c_temp)}°C")
-                    self.badge_gpu_temp.val_lbl.config(text=f"{int(g_temp)}°C")
-                    self.badge_cpu_fan.val_lbl.config(text=f"{c_fan} RPM")
-                    self.badge_gpu_fan.val_lbl.config(text=f"{g_fan} RPM")
+                    # Thermals — show "N/A" if unavailable (temp == 0.0)
+                    cpu_t_str = f"{int(c_temp)}°C" if c_temp > 0 else "N/A"
+                    gpu_t_str = f"{int(g_temp)}°C" if g_temp > 0 else "N/A"
+                    cpu_t_color = "#f87171" if c_temp > 80 else ("#f59e0b" if c_temp > 65 else ("#ef4444" if c_temp > 0 else TEXT_MUTED))
+                    gpu_t_color = "#34d399" if g_temp > 0 else TEXT_MUTED
+                    self.badge_cpu_temp.val_lbl.config(text=cpu_t_str, fg=cpu_t_color)
+                    self.badge_gpu_temp.val_lbl.config(text=gpu_t_str, fg=gpu_t_color)
+                    # Fan RPM — show "N/A" if AsusFanControl unavailable (returns 0 or empty)
+                    cpu_fan_str = f"{c_fan} RPM" if str(c_fan).strip("0") else "N/A"
+                    gpu_fan_str = f"{g_fan} RPM" if str(g_fan).strip("0") else "N/A"
+                    self.badge_cpu_fan.val_lbl.config(text=cpu_fan_str)
+                    self.badge_gpu_fan.val_lbl.config(text=gpu_fan_str)
 
                 self.root.after(0, update_labels)
             except Exception:

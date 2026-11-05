@@ -11,15 +11,15 @@ component MetricBadge inherits Rectangle {
     border-width: 1px;
     border-color: badge-border;
     border-radius: 6px;
-    height: 52px;
+    height: 48px;
 
     VerticalLayout {
         padding-left: 10px;
         padding-right: 10px;
-        padding-top: 6px;
-        padding-bottom: 6px;
+        padding-top: 5px;
+        padding-bottom: 5px;
         alignment: center;
-        spacing: 2px;
+        spacing: 1px;
 
         Text {
             text: root.label;
@@ -46,7 +46,7 @@ component SegmentButton inherits Rectangle {
     border-width: 1px;
     border-color: root.active ? root.active-color : #222938;
     border-radius: 6px;
-    height: 32px;
+    height: 30px;
 
     TouchArea {
         clicked => { root.clicked(); }
@@ -55,7 +55,7 @@ component SegmentButton inherits Rectangle {
 
     Text {
         text: root.text;
-        font-size: 12px;
+        font-size: 11px;
         font-weight: root.active ? 700 : 500;
         color: root.active ? #ffffff : #94a3b8;
         horizontal-alignment: center;
@@ -65,22 +65,22 @@ component SegmentButton inherits Rectangle {
 
 export component AppWindow inherits Window {
     title: "TFlow - ASUS Hardware & Power Manager";
-    preferred-width: 460px;
-    preferred-height: 680px;
-    min-width: 440px;
-    min-height: 660px;
+    preferred-width: 480px;
+    preferred-height: 750px;
+    min-width: 460px;
+    min-height: 710px;
     background: #0b0d13;
     default-font-family: "Inter, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Ubuntu, sans-serif";
 
     // Power & Battery Telemetry
-    in-out property <string> power-mode: "Normal";
+    in-out property <string> power-mode: "Balance";
     in-out property <string> ac-status: "Plugged In";
     in-out property <bool> is-ac-online: true;
     in-out property <string> power-wattage: "14.2 W";
     in-out property <string> battery-level: "98%";
     in-out property <float> battery-pct: 0.98;
     in-out property <string> battery-health: "61.0%";
-    in-out property <string> battery-capacity: "25.1 / 41.1 Ah";
+    in-out property <string> battery-capacity: "25.1 / 41.1 Wh";
     in-out property <string> remaining-time: "2h 45m";
     in-out property <string> full-runtime: "3h 12m";
     in-out property <int> charge-limit: 80;
@@ -91,7 +91,7 @@ export component AppWindow inherits Window {
     in-out property <string> cpu-fan: "2400 RPM";
     in-out property <string> gpu-fan: "2200 RPM";
     in-out property <string> fan-mode: "Auto";
-    in-out property <float> manual-fan-duty: 50.0;
+    in-out property <float> manual-fan-duty: 60.0;
 
     // Callbacks
     callback set-power-mode(string);
@@ -101,11 +101,11 @@ export component AppWindow inherits Window {
     callback refresh-telemetry();
 
     VerticalLayout {
-        padding-left: 16px;
-        padding-right: 16px;
-        padding-top: 14px;
-        padding-bottom: 14px;
-        spacing: 12px;
+        padding-left: 14px;
+        padding-right: 14px;
+        padding-top: 12px;
+        padding-bottom: 12px;
+        spacing: 10px;
 
         // Header
         HorizontalLayout {
@@ -198,7 +198,7 @@ export component AppWindow inherits Window {
             }
         }
 
-        // Section 1: Power & Battery Mode Selector
+        // Section 1: Power & Battery Profile
         Rectangle {
             background: #12151e;
             border-width: 1px;
@@ -206,7 +206,7 @@ export component AppWindow inherits Window {
             border-radius: 8px;
 
             VerticalLayout {
-                padding: 12px;
+                padding: 10px;
                 spacing: 8px;
 
                 HorizontalLayout {
@@ -228,36 +228,36 @@ export component AppWindow inherits Window {
                 HorizontalLayout {
                     spacing: 6px;
                     SegmentButton {
-                        text: "Normal (Balanced)";
-                        active: root.power-mode == "Normal";
-                        active-color: #38bdf8;
-                        clicked => { root.set-power-mode("Normal"); }
-                    }
-                    SegmentButton {
-                        text: "Power Saver (Eco)";
-                        active: root.power-mode == "PowerSaver";
+                        text: "UltraSave";
+                        active: root.power-mode == "UltraSave";
                         active-color: #10b981;
-                        clicked => { root.set-power-mode("PowerSaver"); }
+                        clicked => { root.set-power-mode("UltraSave"); }
                     }
                     SegmentButton {
-                        text: "Ultra Saver";
-                        active: root.power-mode == "UltraSaver";
+                        text: "Balance";
+                        active: root.power-mode == "Balance";
+                        active-color: #38bdf8;
+                        clicked => { root.set-power-mode("Balance"); }
+                    }
+                    SegmentButton {
+                        text: "Performance";
+                        active: root.power-mode == "Performance";
                         active-color: #f59e0b;
-                        clicked => { root.set-power-mode("UltraSaver"); }
+                        clicked => { root.set-power-mode("Performance"); }
                     }
                 }
 
                 Text {
-                    text: root.power-mode == "Normal" ? "Balanced PL1 25W/PL2 35W, dynamic turbo boost, standard governor." :
-                          root.power-mode == "PowerSaver" ? "Energy saving PL1 15W, turbo boost disabled, low-power CPU governor." :
-                          "Deep battery clamping PL1 10W, max clock capped to 50%, dGPU sleep.";
+                    text: root.power-mode == "UltraSave" ? "Ultra battery saving: PL1 10W, CPU capped to 1.2 GHz (50%), Turbo off, GPU sleep, Silent fan." :
+                          root.power-mode == "Performance" ? "Max sustained boost: PL1 45W / PL2 70W, full 4.5 GHz boost, persistence GPU, Turbo fan." :
+                          "Balanced daily profile: PL1 28W / PL2 45W, dynamic turbo scaling, standard governor, Auto fan.";
                     font-size: 10px;
                     color: #64748b;
                 }
             }
         }
 
-        // Section 2: Battery Health & Telemetry
+        // Section 2: Battery Telemetry & Health
         Rectangle {
             background: #12151e;
             border-width: 1px;
@@ -265,8 +265,8 @@ export component AppWindow inherits Window {
             border-radius: 8px;
 
             VerticalLayout {
-                padding: 12px;
-                spacing: 10px;
+                padding: 10px;
+                spacing: 8px;
 
                 Text {
                     text: "BATTERY TELEMETRY & HEALTH";
@@ -275,7 +275,7 @@ export component AppWindow inherits Window {
                     color: #94a3b8;
                 }
 
-                // Grid 1: Battery Level & Health
+                // Row 1: Charge, Health, Wattage
                 HorizontalLayout {
                     spacing: 8px;
                     MetricBadge {
@@ -289,13 +289,13 @@ export component AppWindow inherits Window {
                         value-color: #10b981;
                     }
                     MetricBadge {
-                        label: "DISCHARGE / CHARGE";
+                        label: "POWER DRAW";
                         value: root.power-wattage;
                         value-color: root.is-ac-online ? #10b981 : #f59e0b;
                     }
                 }
 
-                // Grid 2: Runtime Predictions
+                // Row 2: Runtimes
                 HorizontalLayout {
                     spacing: 8px;
                     MetricBadge {
@@ -312,7 +312,7 @@ export component AppWindow inherits Window {
 
                 // Battery Care Charge Limit
                 VerticalLayout {
-                    spacing: 6px;
+                    spacing: 5px;
                     HorizontalLayout {
                         Text {
                             text: "Battery Care Charge Limit:";
@@ -332,7 +332,7 @@ export component AppWindow inherits Window {
                     HorizontalLayout {
                         spacing: 6px;
                         SegmentButton {
-                            text: "60% (Desktop)";
+                            text: "60% (Desk)";
                             active: root.charge-limit == 60;
                             active-color: #38bdf8;
                             clicked => { root.set-charge-limit(60); }
@@ -362,17 +362,26 @@ export component AppWindow inherits Window {
             border-radius: 8px;
 
             VerticalLayout {
-                padding: 12px;
-                spacing: 10px;
+                padding: 10px;
+                spacing: 8px;
 
-                Text {
-                    text: "THERMALS & FANS";
-                    font-size: 10px;
-                    font-weight: 700;
-                    color: #94a3b8;
+                HorizontalLayout {
+                    Text {
+                        text: "THERMALS & FANS";
+                        font-size: 10px;
+                        font-weight: 700;
+                        color: #94a3b8;
+                    }
+                    Text {
+                        text: "Fan Mode: " + root.fan-mode;
+                        font-size: 10px;
+                        font-weight: 600;
+                        color: #c084fc;
+                        horizontal-alignment: end;
+                    }
                 }
 
-                // Thermal metrics
+                // CPU Row
                 HorizontalLayout {
                     spacing: 8px;
                     MetricBadge {
@@ -385,6 +394,11 @@ export component AppWindow inherits Window {
                         value: root.cpu-fan;
                         value-color: #38bdf8;
                     }
+                }
+
+                // GPU Row
+                HorizontalLayout {
+                    spacing: 8px;
                     MetricBadge {
                         label: "GPU TEMPERATURE";
                         value: root.gpu-temp;
@@ -419,7 +433,7 @@ export component AppWindow inherits Window {
                         clicked => { root.set-fan-mode("Turbo"); }
                     }
                     SegmentButton {
-                        text: "100% Max";
+                        text: "Max 100%";
                         active: root.fan-mode == "Max";
                         active-color: #ef4444;
                         clicked => { root.set-fan-mode("Max"); }
@@ -437,7 +451,7 @@ export component AppWindow inherits Window {
                     spacing: 4px;
                     HorizontalLayout {
                         Text {
-                            text: "Manual Duty Cycle:";
+                            text: "Manual Fan Duty:";
                             font-size: 11px;
                             color: #cbd5e1;
                         }
@@ -459,25 +473,25 @@ export component AppWindow inherits Window {
             }
         }
 
-        // Footer / EC Diagnostics
+        // Footer / Hardware Diagnostics
         Rectangle {
             background: #0d1017;
             border-radius: 6px;
-            height: 28px;
+            height: 26px;
             HorizontalLayout {
                 padding-left: 10px;
                 padding-right: 10px;
                 alignment: space-between;
 
                 Text {
-                    text: "EC Controller: Active (Ports 0x25C/0x25D)";
+                    text: "EC Controller: Active (Port I/O 0x25C/0x25D & WMI)";
                     font-size: 10px;
                     font-weight: 500;
                     color: #475569;
                     vertical-alignment: center;
                 }
                 Text {
-                    text: "Linux RAPL + asus-nb-wmi";
+                    text: "Linux RAPL + asus-fan-control-ec";
                     font-size: 10px;
                     font-weight: 500;
                     color: #475569;

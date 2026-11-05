@@ -4,25 +4,25 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PowerMode {
-    Normal,
-    PowerSaver,
-    UltraSaver,
+    UltraSave,
+    Balance,
+    Performance,
 }
 
 impl PowerMode {
     pub fn as_str(&self) -> &'static str {
         match self {
-            PowerMode::Normal => "Normal (Balanced)",
-            PowerMode::PowerSaver => "Power Saver (Eco)",
-            PowerMode::UltraSaver => "Ultra Battery Saver",
+            PowerMode::UltraSave => "UltraSave",
+            PowerMode::Balance => "Balance",
+            PowerMode::Performance => "Performance",
         }
     }
 
     pub fn from_str(s: &str) -> Option<Self> {
-        match s.to_lowercase().as_str() {
-            "normal" | "balanced" | "standard" => Some(PowerMode::Normal),
-            "powersaver" | "power_saver" | "eco" | "saver" => Some(PowerMode::PowerSaver),
-            "ultrasaver" | "ultra_saver" | "ultra" => Some(PowerMode::UltraSaver),
+        match s.to_lowercase().replace(['_', '-', ' '], "").as_str() {
+            "ultrasave" | "ultra" | "saver" | "powersaver" | "eco" => Some(PowerMode::UltraSave),
+            "balance" | "balanced" | "normal" | "standard" => Some(PowerMode::Balance),
+            "performance" | "perf" | "turbo" | "overclock" => Some(PowerMode::Performance),
             _ => None,
         }
     }
@@ -45,27 +45,30 @@ pub fn apply_power_mode(mode: PowerMode) -> Result<(), String> {
 
 #[cfg(target_os = "linux")]
 fn apply_linux_power_mode(mode: PowerMode) -> Result<(), String> {
-    let (pl1_uw, pl2_uw, no_turbo, max_perf, epp) = match mode {
-        PowerMode::Normal => (
-            25_000_000, // 25W
-            35_000_000, // 35W
+    let (pl1_uw, pl2_uw, no_turbo, max_perf, epp, thermal_policy) = match mode {
+        PowerMode::UltraSave => (
+            10_000_000, // 10W deep battery clamp
+            12_000_000, // 12W burst cap
+            "1",        // Turbo disabled to prevent battery drain spikes
+            "50",       // 50% max clock speed (~800MHz - 1.2GHz)
+            "power",    // Energy performance preference: maximum power savings
+            "1",        // ASUS Silent policy
+        ),
+        PowerMode::Balance => (
+            28_000_000, // 28W balanced sustained limit
+            45_000_000, // 45W dynamic burst limit
             "0",        // Turbo enabled
             "100",      // 100% clock speed
             "balance_performance",
+            "0",        // ASUS Standard policy
         ),
-        PowerMode::PowerSaver => (
-            15_000_000, // 15W
-            20_000_000, // 20W
-            "1",        // Turbo disabled (base clock 2.5 GHz)
-            "70",       // 70% clock speed
-            "power",
-        ),
-        PowerMode::UltraSaver => (
-            10_000_000, // 10W (deep clamp)
-            12_000_000, // 12W
-            "1",        // Turbo disabled
-            "50",       // 50% max clock (~800MHz - 1.2GHz)
-            "power",
+        PowerMode::Performance => (
+            45_000_000, // 45W max sustained TDP for Intel Core i5-10300H
+            70_000_000, // 70W high peak burst limit
+            "0",        // Full Turbo Boost up to 4.50 GHz
+            "100",      // 100% full scale
+            "performance", // Immediate ramp, lowest latency
+            "2",        // ASUS Turbo / Overboost policy
         ),
     };
 
@@ -75,13 +78,13 @@ fn apply_linux_power_mode(mode: PowerMode) -> Result<(), String> {
     let _ = fs::write(rapl_pl1, pl1_uw.to_string());
     let _ = fs::write(rapl_pl2, pl2_uw.to_string());
 
-    // 2. Intel P-State
+    // 2. Intel P-State Turbo & Max Performance
     let pstate_turbo = "/sys/devices/system/cpu/intel_pstate/no_turbo";
     let pstate_max_perf = "/sys/devices/system/cpu/intel_pstate/max_perf_pct";
     let _ = fs::write(pstate_turbo, no_turbo);
     let _ = fs::write(pstate_max_perf, max_perf);
 
-    // 3. Energy Performance Preference (EPP)
+    // 3. Energy Performance Preference (EPP) across all CPU cores
     if let Ok(entries) = fs::read_dir("/sys/devices/system/cpu") {
         for entry in entries.flatten() {
             let path = entry.path();
@@ -93,29 +96,41 @@ fn apply_linux_power_mode(mode: PowerMode) -> Result<(), String> {
     }
 
     // 4. ASUS ACPI Thermal Policy (0=Standard, 1=Silent, 2=Overboost)
-    let asus_policy = match mode {
-        PowerMode::Normal => "0",
-        PowerMode::PowerSaver | PowerMode::UltraSaver => "1", // Silent
-    };
     let asus_policy_path = "/sys/devices/platform/asus-nb-wmi/throttle_thermal_policy";
-    let _ = fs::write(asus_policy_path, asus_policy);
+    let _ = fs::write(asus_policy_path, thermal_policy);
 
     // 5. NVIDIA GPU Power Optimization
     use std::process::Stdio;
-    if mode == PowerMode::UltraSaver {
-        // Lower GPU clock to min state (300 MHz)
-        let _ = Command::new("nvidia-smi")
-            .args(["-lgc", "300,300"])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
-    } else {
-        // Reset GPU clocks
-        let _ = Command::new("nvidia-smi")
-            .args(["-rgc"])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
+    match mode {
+        PowerMode::UltraSave => {
+            // Clamp GPU clock to minimal base (300 MHz) so apps don't wake dGPU to 1.7 GHz
+            let _ = Command::new("nvidia-smi")
+                .args(["-lgc", "300,300"])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status();
+        }
+        PowerMode::Balance => {
+            // Reset GPU clocks to normal dynamic frequency range
+            let _ = Command::new("nvidia-smi")
+                .args(["-rgc"])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status();
+        }
+        PowerMode::Performance => {
+            // Reset GPU clocks and enable persistence mode for zero-latency boost
+            let _ = Command::new("nvidia-smi")
+                .args(["-rgc"])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status();
+            let _ = Command::new("nvidia-smi")
+                .args(["-pm", "1"])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status();
+        }
     }
 
     Ok(())
@@ -123,10 +138,10 @@ fn apply_linux_power_mode(mode: PowerMode) -> Result<(), String> {
 
 #[cfg(target_os = "windows")]
 fn apply_windows_power_mode(mode: PowerMode) -> Result<(), String> {
-    // Windows power scheme setting via powercfg
     let guid = match mode {
-        PowerMode::Normal => "381b4222-f694-41f0-9685-ff5bb260df2e", // Balanced
-        PowerMode::PowerSaver | PowerMode::UltraSaver => "a1841308-3541-4fab-bc81-f71556f20b4a", // Power Saver
+        PowerMode::UltraSave => "a1841308-3541-4fab-bc81-f71556f20b4a", // Power Saver
+        PowerMode::Balance => "381b4222-f694-41f0-9685-ff5bb260df2e",   // Balanced
+        PowerMode::Performance => "8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c", // High Performance
     };
     let _ = Command::new("powercfg")
         .args(["/setactive", guid])
@@ -146,17 +161,25 @@ pub fn get_current_power_mode() -> PowerMode {
             .and_then(|s| s.trim().parse::<u32>().ok())
             .unwrap_or(100);
 
-        if turbo_disabled && max_perf <= 55 {
-            PowerMode::UltraSaver
-        } else if turbo_disabled {
-            PowerMode::PowerSaver
+        let pl1 = fs::read_to_string("/sys/class/powercap/intel-rapl/intel-rapl:0/constraint_0_power_limit_uw")
+            .ok()
+            .and_then(|s| s.trim().parse::<u64>().ok())
+            .unwrap_or(28_000_000);
+
+        let policy = fs::read_to_string("/sys/devices/platform/asus-nb-wmi/throttle_thermal_policy")
+            .map(|s| s.trim().to_string())
+            .unwrap_or_default();
+
+        if (turbo_disabled && max_perf <= 60) || pl1 <= 15_000_000 {
+            PowerMode::UltraSave
+        } else if policy == "2" || pl1 >= 40_000_000 {
+            PowerMode::Performance
         } else {
-            PowerMode::Normal
+            PowerMode::Balance
         }
     }
     #[cfg(not(target_os = "linux"))]
     {
-        PowerMode::Normal
+        PowerMode::Balance
     }
 }
-

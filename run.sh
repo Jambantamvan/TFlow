@@ -3,6 +3,8 @@
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$DIR"
 
+export SLINT_BACKEND="${SLINT_BACKEND:-winit-software}"
+
 if [ -f "$DIR/target/release/tflow" ]; then
     exec "$DIR/target/release/tflow" "$@"
 elif command -v tflow &>/dev/null; then

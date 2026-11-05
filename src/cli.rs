@@ -14,7 +14,7 @@ pub struct CliArgs {
     #[arg(short, long)]
     pub status: bool,
 
-    /// Set battery and power mode: normal, eco, ultra
+    /// Set power profile: ultrasave, balance, performance
     #[arg(short, long)]
     pub mode: Option<String>,
 
@@ -41,11 +41,19 @@ pub fn handle_cli_commands(args: &CliArgs) -> bool {
     if let Some(mode_str) = &args.mode {
         if let Some(mode) = PowerMode::from_str(mode_str) {
             match apply_power_mode(mode) {
-                Ok(_) => println!("[TFlow] Power profile applied: {}", mode.as_str()),
+                Ok(_) => {
+                    let default_fan = match mode {
+                        PowerMode::UltraSave => "Silent",
+                        PowerMode::Balance => "Auto",
+                        PowerMode::Performance => "Turbo",
+                    };
+                    let _ = set_fan_profile(default_fan, None);
+                    println!("[TFlow] Power profile applied: {} (Fan default: {})", mode.as_str(), default_fan);
+                }
                 Err(e) => eprintln!("[TFlow] Error applying power profile: {}", e),
             }
         } else {
-            eprintln!("[TFlow] Unknown power mode: {}. Use normal, eco, or ultra.", mode_str);
+            eprintln!("[TFlow] Unknown power mode: {}. Use ultrasave, balance, or performance.", mode_str);
         }
         handled = true;
     }
@@ -101,16 +109,19 @@ pub fn print_telemetry_table() {
     if bat.full_charge_runtime_mins >= 0 {
         let hrs = bat.full_charge_runtime_mins / 60;
         let mins = bat.full_charge_runtime_mins % 60;
-        println!("    Full Battery Runtime: {}h {}m (estimated at current load)", hrs, mins);
+        println!("    Est. Full Runtime   : {}h {}m", hrs, mins);
+    } else {
+        println!("    Est. Full Runtime   : N/A");
     }
 
     println!("    Charge Threshold    : {}% Max", bat.charge_limit);
     println!("------------------------------------------------------------");
-    println!("  Thermal & Acoustic Subsystem:");
+    println!("  Thermal & Cooling Subsystem:");
     println!("    CPU Temperature     : {}°C", therm.cpu_temp_c);
-    println!("    GPU Temperature     : {}°C", therm.gpu_temp_c);
     println!("    CPU Fan Speed       : {} RPM", therm.cpu_fan_rpm);
+    println!("    GPU Temperature     : {}°C", therm.gpu_temp_c);
     println!("    GPU Fan Speed       : {} RPM", therm.gpu_fan_rpm);
-    println!("    Fan Profile         : {}", therm.fan_mode);
+    println!("    Fan Profile Mode    : {}", therm.fan_mode);
+    println!("    Manual Duty Cycle   : {}%", therm.manual_fan_duty);
     println!("============================================================");
 }

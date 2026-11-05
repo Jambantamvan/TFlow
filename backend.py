@@ -79,24 +79,45 @@ class HardwareBackend:
                         pass
             return max(temps) if temps else 45.0
         else:
-            # Windows path 1: AsusFanControl.exe --get-cpu-temp (needs SYSTEM via PsExec)
+            # Windows path 1: PsExec -> SYSTEM privilege (best accuracy; works via run.bat admin)
             try:
                 cmd = [self.psexec_exe, "-accepteula", "-s", self.afc_exe, "--get-cpu-temp"]
                 res = self._run_silent(cmd, capture_output=True, timeout=5)
-                val = res.stdout.strip()
-                if res.returncode == 0 and val.replace(".", "", 1).lstrip("-").isdigit():
-                    t = float(val)
-                    if 10.0 < t < 120.0:
-                        return t
+                # PsExec may add banner lines; scan ALL lines for a standalone numeric value
+                for line in res.stdout.splitlines():
+                    line = line.strip()
+                    if line.replace(".", "", 1).lstrip("-").isdigit():
+                        t = float(line)
+                        if 10.0 < t < 120.0:
+                            return t
             except Exception:
                 pass
-            # Windows path 2: WMI MSAcpi_ThermalZoneTemperature (needs admin, works when run.bat elevates)
+
+            # Windows path 2: Direct AsusFanControl without PsExec (may work with admin-only)
+            try:
+                cmd = [self.afc_exe, "--get-cpu-temp"]
+                res = self._run_silent(cmd, capture_output=True, timeout=3)
+                for line in res.stdout.splitlines():
+                    line = line.strip()
+                    if line.replace(".", "", 1).lstrip("-").isdigit():
+                        t = float(line)
+                        if 10.0 < t < 120.0:
+                            return t
+            except Exception:
+                pass
+
+            # Windows path 3: WMI MSAcpi_ThermalZoneTemperature — last resort.
+            # NOTE: ACPI thermal zones are event-driven and update slowly (not real-time).
+            # They reflect firmware-averaged temps, not individual Intel core Tj.
+            # Only use if above paths both fail.
             try:
                 ps = (
                     "try {"
+                    # Filter only zones whose InstanceName contains 'CPU' or 'TZ' (skip ambient/skin sensors)
                     "$tz = Get-CimInstance -Namespace root/wmi -ClassName MSAcpi_ThermalZoneTemperature -ErrorAction Stop;"
-                    "$max = ($tz | ForEach-Object { ($_.CurrentTemperature - 2732) / 10 } | Measure-Object -Maximum).Maximum;"
-                    "Write-Output ([math]::Round($max, 1))"
+                    "$vals = $tz | ForEach-Object { ($_.CurrentTemperature - 2732) / 10 };"
+                    "$max = ($vals | Measure-Object -Maximum).Maximum;"
+                    "if ($max -gt 0) { Write-Output ([math]::Round($max,1)) } else { Write-Output '0' }"
                     "} catch { Write-Output '0' }"
                 )
                 res = self._run_silent(
@@ -110,7 +131,8 @@ class HardwareBackend:
                         return t
             except Exception:
                 pass
-            return 0.0  # Indicate unavailable — UI should show "N/A"
+
+            return 0.0  # Unavailable — GUI will show "N/A"
 
     def get_gpu_temp(self):
         try:

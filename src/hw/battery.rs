@@ -157,8 +157,7 @@ fn read_linux_battery() -> BatteryTelemetry {
 
 #[cfg(target_os = "windows")]
 fn read_windows_battery() -> BatteryTelemetry {
-    // Windows fallback using WMI / Win32_Battery or default safe values
-    BatteryTelemetry::default()
+    super::windows::read_windows_battery()
 }
 
 pub fn set_charge_limit(limit: u32) -> Result<(), String> {
@@ -192,8 +191,7 @@ pub fn set_charge_limit(limit: u32) -> Result<(), String> {
 
     #[cfg(target_os = "windows")]
     {
-        // On Windows, ASUS ATK / WMI method
-        Ok(())
+        super::windows::set_windows_charge_limit(limit)
     }
 
     #[cfg(not(any(target_os = "linux", target_os = "windows")))]

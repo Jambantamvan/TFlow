@@ -1,6 +1,7 @@
 """
-TFlow - Modern Hardware & Fan Performance Manager
-Written in pure Python Tkinter with a sleek dark aesthetic.
+TFlow v2.0 - Hardware & Fan Performance Manager
+Tkinter Fallback GUI for Windows & Linux
+High-density G-Helper inspired dark aesthetic (#0b0d13).
 """
 
 import tkinter as tk
@@ -9,400 +10,352 @@ import threading
 import time
 from backend import HardwareBackend
 
-# Color Theme (G-Helper / Dark TUF Style)
-BG_MAIN = "#121215"
-BG_CARD = "#1a1a22"
-BG_CARD_HOVER = "#22222c"
-BORDER_COLOR = "#2a2a36"
-ACCENT_RED = "#e63946"
-ACCENT_BLUE = "#3b82f6"
-TEXT_WHITE = "#f3f4f6"
-TEXT_MUTED = "#9ca3af"
-GREEN_BADGE = "#10b981"
-AMBER_BADGE = "#f59e0b"
-RED_BADGE = "#ef4444"
+# Color Theme (G-Helper Dark Aesthetic)
+BG_MAIN = "#0b0d13"
+BG_CARD = "#12151e"
+BG_CARD_HOVER = "#181d2a"
+BORDER_COLOR = "#1e2433"
+ACCENT_BLUE = "#38bdf8"
+ACCENT_GREEN = "#10b981"
+ACCENT_AMBER = "#f59e0b"
+ACCENT_RED = "#ef4444"
+ACCENT_PURPLE = "#c084fc"
+TEXT_WHITE = "#ffffff"
+TEXT_MUTED = "#8b9bb4"
+TEXT_SUB = "#64748b"
 
 class TFlowApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("TFlow")
-        self.root.geometry("440x680")
+        self.root.title("TFlow - ASUS Hardware & Power Manager")
+        self.root.geometry("480x750")
         self.root.configure(bg=BG_MAIN)
         self.root.resizable(False, False)
 
         self.backend = HardwareBackend()
         self.running = True
 
+        self.power_mode = "Balance"
+        self.fan_mode = "Auto"
+        self.charge_limit = 80
+
         self._setup_styles()
         self._build_ui()
 
-        # Start live background polling
+        # Start live background polling (non-blocking)
         self.poll_thread = threading.Thread(target=self._update_loop, daemon=True)
         self.poll_thread.start()
 
     def _setup_styles(self):
         self.style = ttk.Style()
         self.style.theme_use("clam")
-
-        # Configure horizontal scale slider
         self.style.configure(
             "TFlow.Horizontal.TScale",
-            troughcolor="#22222c",
-            background=ACCENT_RED,
-            sliderlength=22,
+            troughcolor="#1e2433",
+            background=ACCENT_BLUE,
+            sliderlength=20,
             sliderthickness=14
         )
 
     def _build_ui(self):
-        main_container = tk.Frame(self.root, bg=BG_MAIN, padx=16, pady=16)
+        main_container = tk.Frame(self.root, bg=BG_MAIN, padx=14, pady=12)
         main_container.pack(fill=tk.BOTH, expand=True)
 
         # ---------------- HEADER ----------------
         header_frame = tk.Frame(main_container, bg=BG_MAIN)
-        header_frame.pack(fill=tk.X, pady=(0, 14))
+        header_frame.pack(fill=tk.X, pady=(0, 10))
 
-        title_lbl = tk.Label(
-            header_frame,
-            text="⚡ TFLOW",
-            font=("Segoe UI", 14, "bold"),
-            fg=TEXT_WHITE,
-            bg=BG_MAIN
-        )
-        title_lbl.pack(anchor="w")
+        title_box = tk.Frame(header_frame, bg=BG_MAIN)
+        title_box.pack(side=tk.LEFT)
 
-        sub_lbl = tk.Label(
-            header_frame,
-            text=f"Thermal & Performance Manager • {self.backend.os_type} Edition",
-            font=("Segoe UI", 9),
-            fg=TEXT_MUTED,
-            bg=BG_MAIN
-        )
-        sub_lbl.pack(anchor="w")
+        title_row = tk.Frame(title_box, bg=BG_MAIN)
+        title_row.pack(anchor="w")
 
-        # Badges (Live CPU & GPU Temp)
-        badge_frame = tk.Frame(header_frame, bg=BG_MAIN)
-        badge_frame.pack(fill=tk.X, pady=(8, 0))
+        tk.Label(title_row, text="TFlow", font=("Segoe UI", 14, "bold"), fg=TEXT_WHITE, bg=BG_MAIN).pack(side=tk.LEFT)
+        tk.Label(title_row, text=" v2.0 ", font=("Segoe UI", 8, "bold"), fg=ACCENT_BLUE, bg="#1e293b").pack(side=tk.LEFT, padx=6)
 
-        self.cpu_badge = tk.Label(
-            badge_frame,
-            text="CPU: -- °C",
-            font=("Segoe UI", 10, "bold"),
-            bg="#2a2a36",
-            fg=GREEN_BADGE,
-            padx=10,
-            pady=4
-        )
-        self.cpu_badge.pack(side=tk.LEFT, padx=(0, 8))
+        tk.Label(title_box, text=f"ASUS TUF FX506LH • {self.backend.os_type} Edition", font=("Segoe UI", 8), fg=TEXT_SUB, bg=BG_MAIN).pack(anchor="w")
 
-        self.gpu_badge = tk.Label(
-            badge_frame,
-            text="GPU: -- °C",
-            font=("Segoe UI", 10, "bold"),
-            bg="#2a2a36",
-            fg=GREEN_BADGE,
-            padx=10,
-            pady=4
-        )
-        self.gpu_badge.pack(side=tk.LEFT)
+        # Top Pills (AC Status & Wattage)
+        pill_box = tk.Frame(header_frame, bg=BG_MAIN)
+        pill_box.pack(side=tk.RIGHT)
 
-        # ---------------- CARD 1: PERFORMANCE PROFILES ----------------
-        card1 = self._create_card(main_container, "⚡ PROFIL PERFORMA")
+        self.ac_pill = tk.Label(pill_box, text="Plugged In", font=("Segoe UI", 9, "bold"), fg=ACCENT_GREEN, bg="#064e3b", padx=8, pady=2)
+        self.ac_pill.pack(side=tk.LEFT, padx=(0, 6))
 
-        prof_btn_frame = tk.Frame(card1, bg=BG_CARD)
-        prof_btn_frame.pack(fill=tk.X, pady=6)
+        self.watt_pill = tk.Label(pill_box, text="0.0 W", font=("Segoe UI", 9, "bold"), fg=TEXT_WHITE, bg="#111827", padx=8, pady=2)
+        self.watt_pill.pack(side=tk.LEFT)
 
-        self.btn_silent = self._create_flat_button(prof_btn_frame, "🤫 Silent", lambda: self._on_profile_click("Silent"))
-        self.btn_silent.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=2)
+        # ---------------- SECTION 1: POWER & BATTERY PROFILE ----------------
+        sec1 = self._create_card(main_container, "POWER & BATTERY PROFILE", "Active: Balance")
+        self.sec1_hdr_right = sec1[1]
+        sec1_body = sec1[0]
 
-        self.btn_balanced = self._create_flat_button(prof_btn_frame, "⚖️ Balanced", lambda: self._on_profile_click("Balanced"))
-        self.btn_balanced.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=2)
+        p_btn_frame = tk.Frame(sec1_body, bg=BG_CARD)
+        p_btn_frame.pack(fill=tk.X, pady=(6, 4))
 
-        self.btn_turbo = self._create_flat_button(prof_btn_frame, "🚀 Turbo", lambda: self._on_profile_click("Turbo"))
-        self.btn_turbo.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=2)
+        self.btn_ultra = self._create_seg_btn(p_btn_frame, "UltraSave", lambda: self.set_power("UltraSave"))
+        self.btn_balance = self._create_seg_btn(p_btn_frame, "Balance", lambda: self.set_power("Balance"), active=True)
+        self.btn_perf = self._create_seg_btn(p_btn_frame, "Performance", lambda: self.set_power("Performance"))
 
-        self.prof_desc_lbl = tk.Label(
-            card1,
-            text="⚖️ Balanced: CPU 35W (Cap 85%), GPU 1450MHz. Optimal Game (65-72°C).",
+        self.btn_ultra.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=2)
+        self.btn_balance.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=2)
+        self.btn_perf.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=2)
+
+        self.power_desc = tk.Label(
+            sec1_body,
+            text="Balanced daily profile: dynamic turbo boost, standard governor, Auto fan.",
             font=("Segoe UI", 8),
-            fg=TEXT_MUTED,
-            bg=BG_CARD,
-            justify=tk.LEFT
-        )
-        self.prof_desc_lbl.pack(anchor="w", pady=(2, 0))
-
-        # ---------------- CARD 2: MODE DINGIN (CPU BOOST TUNING) ----------------
-        card2 = self._create_card(main_container, "❄️ TUNING SUHU DINGIN (CPU BOOST)")
-
-        c2_top = tk.Frame(card2, bg=BG_CARD)
-        c2_top.pack(fill=tk.X, pady=(2, 4))
-
-        c2_desc = tk.Label(
-            c2_top,
-            text="Mode Dingin menonaktifkan Turbo Boost agresif.\nSuhu turun 15°C - 20°C (65-72°C saat main game)\ndan bebas lag stutter throttling.",
-            font=("Segoe UI", 8),
-            fg=TEXT_MUTED,
-            bg=BG_CARD,
-            justify=tk.LEFT
-        )
-        c2_desc.pack(side=tk.LEFT, anchor="w")
-
-        self.cold_btn = tk.Button(
-            card2,
-            text="❄️ MODE DINGIN: AKTIF",
-            font=("Segoe UI", 10, "bold"),
-            bg="#064e3b",
-            fg="#6ee7b7",
-            activebackground="#047857",
-            activeforeground="#ffffff",
-            relief=tk.FLAT,
-            cursor="hand2",
-            padx=12,
-            pady=8,
-            command=self._on_toggle_cold_mode
-        )
-        self.cold_btn.pack(fill=tk.X, pady=(6, 2))
-
-        # ---------------- CARD 3: KONTROL KIPAS & RPM ----------------
-        card3 = self._create_card(main_container, "🌪️ KONTROL KIPAS & RPM REAL-TIME")
-
-        # Live Tachometer readout
-        tach_frame = tk.Frame(card3, bg=BG_CARD)
-        tach_frame.pack(fill=tk.X, pady=(0, 8))
-
-        self.cpu_rpm_lbl = tk.Label(
-            tach_frame,
-            text="CPU Fan : ---- RPM",
-            font=("Segoe UI", 10, "bold"),
-            fg=TEXT_WHITE,
-            bg="#22222c",
-            padx=10,
-            pady=6
-        )
-        self.cpu_rpm_lbl.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(0, 4))
-
-        self.gpu_rpm_lbl = tk.Label(
-            tach_frame,
-            text="GPU Fan : ---- RPM",
-            font=("Segoe UI", 10, "bold"),
-            fg=TEXT_WHITE,
-            bg="#22222c",
-            padx=10,
-            pady=6
-        )
-        self.gpu_rpm_lbl.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(4, 0))
-
-        # Slider header
-        slider_info = tk.Frame(card3, bg=BG_CARD)
-        slider_info.pack(fill=tk.X, pady=(4, 0))
-
-        tk.Label(
-            slider_info,
-            text="Kecepatan Kipas Manual:",
-            font=("Segoe UI", 9),
-            fg=TEXT_MUTED,
-            bg=BG_CARD
-        ).pack(side=tk.LEFT)
-
-        self.slider_val_lbl = tk.Label(
-            slider_info,
-            text="100%",
-            font=("Segoe UI", 10, "bold"),
-            fg=ACCENT_RED,
+            fg=TEXT_SUB,
             bg=BG_CARD
         )
+        self.power_desc.pack(anchor="w")
+
+        # ---------------- SECTION 2: BATTERY TELEMETRY & HEALTH ----------------
+        sec2 = self._create_card(main_container, "BATTERY TELEMETRY & HEALTH")
+        sec2_body = sec2[0]
+
+        # Row 1: Charge, Health, Power Draw
+        b_row1 = tk.Frame(sec2_body, bg=BG_CARD)
+        b_row1.pack(fill=tk.X, pady=(4, 6))
+
+        self.badge_charge = self._create_badge(b_row1, "BATTERY CHARGE", "100%", ACCENT_BLUE)
+        self.badge_health = self._create_badge(b_row1, "BATTERY HEALTH", "60.9%", ACCENT_GREEN)
+        self.badge_power = self._create_badge(b_row1, "POWER DRAW", "0.0 W", ACCENT_GREEN)
+
+        self.badge_charge.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=2)
+        self.badge_health.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=2)
+        self.badge_power.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=2)
+
+        # Row 2: Runtimes
+        b_row2 = tk.Frame(sec2_body, bg=BG_CARD)
+        b_row2.pack(fill=tk.X, pady=(0, 6))
+
+        self.badge_rem = self._create_badge(b_row2, "REMAINING RUNTIME", "Connected (AC)", TEXT_WHITE)
+        self.badge_full = self._create_badge(b_row2, "FULL BATTERY RUNTIME", "2h 15m", "#a5b4fc")
+
+        self.badge_rem.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=2)
+        self.badge_full.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=2)
+
+        # Charge Limit Controls
+        c_limit_box = tk.Frame(sec2_body, bg=BG_CARD)
+        c_limit_box.pack(fill=tk.X, pady=(4, 0))
+
+        tk.Label(c_limit_box, text="Battery Care Charge Limit: 80% Max", font=("Segoe UI", 8, "bold"), fg=TEXT_MUTED, bg=BG_CARD).pack(anchor="w")
+
+        c_btn_frame = tk.Frame(c_limit_box, bg=BG_CARD)
+        c_btn_frame.pack(fill=tk.X, pady=(4, 0))
+
+        self.btn_c60 = self._create_seg_btn(c_btn_frame, "60% (Desk)", lambda: self.set_charge(60))
+        self.btn_c80 = self._create_seg_btn(c_btn_frame, "80% (Balanced)", lambda: self.set_charge(80), active=True)
+        self.btn_c100 = self._create_seg_btn(c_btn_frame, "100% (Maximum)", lambda: self.set_charge(100))
+
+        self.btn_c60.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=2)
+        self.btn_c80.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=2)
+        self.btn_c100.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=2)
+
+        # ---------------- SECTION 3: THERMALS & FANS ----------------
+        sec3 = self._create_card(main_container, "THERMALS & FANS", "Fan Mode: Auto")
+        self.sec3_hdr_right = sec3[1]
+        sec3_body = sec3[0]
+
+        # CPU Row
+        t_row1 = tk.Frame(sec3_body, bg=BG_CARD)
+        t_row1.pack(fill=tk.X, pady=(4, 6))
+
+        self.badge_cpu_temp = self._create_badge(t_row1, "CPU TEMPERATURE", "48°C", "#f87171")
+        self.badge_cpu_fan = self._create_badge(t_row1, "CPU FAN SPEED", "3800 RPM", ACCENT_BLUE)
+        self.badge_cpu_temp.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=2)
+        self.badge_cpu_fan.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=2)
+
+        # GPU Row
+        t_row2 = tk.Frame(sec3_body, bg=BG_CARD)
+        t_row2.pack(fill=tk.X, pady=(0, 6))
+
+        self.badge_gpu_temp = self._create_badge(t_row2, "GPU TEMPERATURE", "42°C", "#34d399")
+        self.badge_gpu_fan = self._create_badge(t_row2, "GPU FAN SPEED", "3750 RPM", ACCENT_BLUE)
+        self.badge_gpu_temp.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=2)
+        self.badge_gpu_fan.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=2)
+
+        # Fan Presets
+        f_btn_frame = tk.Frame(sec3_body, bg=BG_CARD)
+        f_btn_frame.pack(fill=tk.X, pady=(4, 6))
+
+        self.btn_f_auto = self._create_seg_btn(f_btn_frame, "Auto", lambda: self.set_fan("Auto"), active=True)
+        self.btn_f_silent = self._create_seg_btn(f_btn_frame, "Silent", lambda: self.set_fan("Silent"))
+        self.btn_f_turbo = self._create_seg_btn(f_btn_frame, "Turbo", lambda: self.set_fan("Turbo"))
+        self.btn_f_max = self._create_seg_btn(f_btn_frame, "Max 100%", lambda: self.set_fan("Max"))
+        self.btn_f_manual = self._create_seg_btn(f_btn_frame, "Manual", lambda: self.set_fan("Manual"))
+
+        self.btn_f_auto.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=1)
+        self.btn_f_silent.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=1)
+        self.btn_f_turbo.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=1)
+        self.btn_f_max.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=1)
+        self.btn_f_manual.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=1)
+
+        # Manual Fan Duty Slider
+        self.slider_frame = tk.Frame(sec3_body, bg=BG_CARD)
+        slider_hdr = tk.Frame(self.slider_frame, bg=BG_CARD)
+        slider_hdr.pack(fill=tk.X)
+        tk.Label(slider_hdr, text="Manual Fan Duty:", font=("Segoe UI", 8), fg=TEXT_MUTED, bg=BG_CARD).pack(side=tk.LEFT)
+        self.slider_val_lbl = tk.Label(slider_hdr, text="60%", font=("Segoe UI", 8, "bold"), fg=ACCENT_PURPLE, bg=BG_CARD)
         self.slider_val_lbl.pack(side=tk.RIGHT)
 
-        # Scale slider
-        self.fan_slider = ttk.Scale(
-            card3,
+        self.duty_slider = ttk.Scale(
+            self.slider_frame,
             from_=20,
             to=100,
             orient=tk.HORIZONTAL,
             style="TFlow.Horizontal.TScale",
-            command=self._on_slider_move
+            command=self._on_slider_change
         )
-        self.fan_slider.set(100)
-        self.fan_slider.pack(fill=tk.X, pady=(4, 8))
-        self.fan_slider.bind("<ButtonRelease-1>", lambda e: self._apply_slider_speed())
+        self.duty_slider.set(60)
+        self.duty_slider.pack(fill=tk.X, pady=(2, 0))
 
-        # Quick preset buttons
-        preset_frame = tk.Frame(card3, bg=BG_CARD)
-        preset_frame.pack(fill=tk.X, pady=(2, 4))
+        # ---------------- FOOTER ----------------
+        footer_frame = tk.Frame(main_container, bg="#0d1017", padx=8, pady=4)
+        footer_frame.pack(fill=tk.X, pady=(10, 0))
 
-        self.btn_auto = self._create_flat_button(preset_frame, "Auto (BIOS)", lambda: self._on_preset_click(0))
-        self.btn_auto.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=2)
+        tk.Label(footer_frame, text="EC Controller: Active", font=("Segoe UI", 7), fg=TEXT_SUB, bg="#0d1017").pack(side=tk.LEFT)
+        tk.Label(footer_frame, text=f"{self.backend.os_type} HAL Core", font=("Segoe UI", 7), fg=TEXT_SUB, bg="#0d1017").pack(side=tk.RIGHT)
 
-        self.btn_50 = self._create_flat_button(preset_frame, "50%", lambda: self._on_preset_click(50))
-        self.btn_50.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=2)
-
-        self.btn_75 = self._create_flat_button(preset_frame, "75%", lambda: self._on_preset_click(75))
-        self.btn_75.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=2)
-
-        # Big Max Force Button
-        self.max_btn = tk.Button(
-            card3,
-            text="🔥 PAKSA KIPAS 100% (MAKSIMAL)",
-            font=("Segoe UI", 10, "bold"),
-            bg="#991b1b",
-            fg="#fecaca",
-            activebackground="#b91c1c",
-            activeforeground="#ffffff",
-            relief=tk.FLAT,
-            cursor="hand2",
-            padx=12,
-            pady=8,
-            command=lambda: self._on_preset_click(100)
-        )
-        self.max_btn.pack(fill=tk.X, pady=(8, 2))
-
-        # Status text footer
-        self.status_lbl = tk.Label(
-            main_container,
-            text="Status: Hardware connected & ready.",
-            font=("Segoe UI", 8),
-            fg=TEXT_MUTED,
-            bg=BG_MAIN
-        )
-        self.status_lbl.pack(side=tk.BOTTOM, anchor="w", pady=(8, 0))
-
-    def _create_card(self, parent, title):
-        card = tk.Frame(parent, bg=BG_CARD, padx=12, pady=10, highlightbackground=BORDER_COLOR, highlightthickness=1)
+    def _create_card(self, parent, title, right_text=None):
+        card = tk.Frame(parent, bg=BG_CARD, highlightbackground=BORDER_COLOR, highlightthickness=1, padx=10, pady=8)
         card.pack(fill=tk.X, pady=(0, 10))
 
-        title_lbl = tk.Label(
-            card,
-            text=title,
-            font=("Segoe UI", 9, "bold"),
-            fg=TEXT_MUTED,
-            bg=BG_CARD
-        )
-        title_lbl.pack(anchor="w", pady=(0, 4))
-        return card
+        hdr = tk.Frame(card, bg=BG_CARD)
+        hdr.pack(fill=tk.X)
 
-    def _create_flat_button(self, parent, text, command):
+        tk.Label(hdr, text=title, font=("Segoe UI", 8, "bold"), fg=TEXT_MUTED, bg=BG_CARD).pack(side=tk.LEFT)
+        right_lbl = None
+        if right_text:
+            right_lbl = tk.Label(hdr, text=right_text, font=("Segoe UI", 8, "bold"), fg=ACCENT_BLUE, bg=BG_CARD)
+            right_lbl.pack(side=tk.RIGHT)
+
+        return card, right_lbl
+
+    def _create_badge(self, parent, label, val, color):
+        frame = tk.Frame(parent, bg="#141720", highlightbackground="#222938", highlightthickness=1, padx=8, pady=5)
+        tk.Label(frame, text=label, font=("Segoe UI", 7, "bold"), fg=TEXT_MUTED, bg="#141720").pack(anchor="w")
+        val_lbl = tk.Label(frame, text=val, font=("Segoe UI", 11, "bold"), fg=color, bg="#141720")
+        val_lbl.pack(anchor="w")
+        frame.val_lbl = val_lbl
+        return frame
+
+    def _create_seg_btn(self, parent, text, cmd, active=False):
+        bg = "#1e293b" if active else "#11141c"
+        fg = TEXT_WHITE if active else TEXT_MUTED
         btn = tk.Button(
             parent,
             text=text,
-            font=("Segoe UI", 9, "bold"),
-            bg="#262633",
-            fg=TEXT_WHITE,
-            activebackground="#323244",
-            activeforeground="#ffffff",
+            font=("Segoe UI", 8, "bold" if active else "normal"),
+            bg=bg,
+            fg=fg,
+            activebackground="#222938",
+            activeforeground=TEXT_WHITE,
             relief=tk.FLAT,
-            cursor="hand2",
-            padx=8,
-            pady=6,
-            command=command
+            bd=0,
+            padx=6,
+            pady=4,
+            command=cmd
         )
+        btn.active = active
         return btn
 
-    # ---------------- EVENT HANDLERS ----------------
+    def set_power(self, mode):
+        self.power_mode = mode
+        self.sec1_hdr_right.config(text=f"Active: {mode}")
 
-    def _on_profile_click(self, profile):
-        self.status_lbl.config(text=f"Menerapkan profil {profile}...")
-        threading.Thread(target=self._apply_profile_bg, args=(profile,), daemon=True).start()
+        for b, m in [(self.btn_ultra, "UltraSave"), (self.btn_balance, "Balance"), (self.btn_perf, "Performance")]:
+            is_act = m == mode
+            b.config(bg="#1e293b" if is_act else "#11141c", fg=TEXT_WHITE if is_act else TEXT_MUTED)
 
-    def _apply_profile_bg(self, profile):
-        self.backend.set_power_profile(profile)
-        self._highlight_profile(profile)
-        self.root.after(0, lambda: self.status_lbl.config(text=f"Profil aktif: {profile}"))
-
-    def _highlight_profile(self, profile):
-        buttons = {"Silent": self.btn_silent, "Balanced": self.btn_balanced, "Turbo": self.btn_turbo}
-        desc_map = {
-            "Silent": "🤫 Silent: CPU 25W (Tanpa Boost), GPU Max 1200MHz. Hening & Dingin (45-55°C).",
-            "Balanced": "⚖️ Balanced: CPU 35W (Cap 85%), GPU Max 1450MHz. Optimal Game (65-72°C).",
-            "Turbo": "🚀 Turbo: CPU 50W (Full 4.2GHz), GPU Full Boost (1785MHz). Performa Maksimal."
-        }
-        for name, btn in buttons.items():
-            if name == profile:
-                btn.config(bg=ACCENT_RED, fg="#ffffff")
-            else:
-                btn.config(bg="#262633", fg=TEXT_WHITE)
-        if hasattr(self, "prof_desc_lbl") and profile in desc_map:
-            self.prof_desc_lbl.config(text=desc_map[profile])
-
-    def _on_toggle_cold_mode(self):
-        cur = self.backend.get_cold_mode()
-        new_val = not cur
-        self.backend.set_cold_mode(new_val)
-        self._update_cold_mode_ui(new_val)
-
-    def _update_cold_mode_ui(self, is_cold):
-        if is_cold:
-            self.cold_btn.config(
-                text="❄️ MODE DINGIN: AKTIF (Maks. ~70°C)",
-                bg="#064e3b",
-                fg="#6ee7b7"
-            )
+        if mode == "UltraSave":
+            self.power_desc.config(text="Ultra battery saving: PL1 10W, CPU capped to 1.2 GHz, Turbo off, Silent fan.")
+            self.set_fan("Silent")
+        elif mode == "Performance":
+            self.power_desc.config(text="Max sustained boost: PL1 45W / PL2 70W, full 4.5 GHz boost, Turbo fan.")
+            self.set_fan("Turbo")
         else:
-            self.cold_btn.config(
-                text="🔥 MODE DINGIN: MATI (Full Turbo Boost)",
-                bg="#3f3f46",
-                fg="#d4d4d8"
-            )
+            self.power_desc.config(text="Balanced daily profile: PL1 28W / PL2 45W, dynamic turbo scaling, Auto fan.")
+            self.set_fan("Auto")
 
-    def _on_slider_move(self, val):
-        pct = int(float(val))
-        self.slider_val_lbl.config(text=f"{pct}%")
+        threading.Thread(target=lambda: self.backend.set_power_profile(mode), daemon=True).start()
 
-    def _apply_slider_speed(self):
-        pct = int(self.fan_slider.get())
-        self.status_lbl.config(text=f"Mengatur kipas ke {pct}%...")
-        threading.Thread(target=self._apply_fan_speed_bg, args=(pct,), daemon=True).start()
+    def set_fan(self, mode):
+        self.fan_mode = mode
+        self.sec3_hdr_right.config(text=f"Fan Mode: {mode}")
 
-    def _on_preset_click(self, pct):
-        self.fan_slider.set(pct if pct > 0 else 50)
-        self.slider_val_lbl.config(text=f"{pct}%" if pct > 0 else "Auto")
-        self.status_lbl.config(text=f"Menerapkan kecepatan {pct}%..." if pct > 0 else "Mengembalikan kendali ke Auto...")
-        threading.Thread(target=self._apply_fan_speed_bg, args=(pct,), daemon=True).start()
+        buttons = [
+            (self.btn_f_auto, "Auto"),
+            (self.btn_f_silent, "Silent"),
+            (self.btn_f_turbo, "Turbo"),
+            (self.btn_f_max, "Max"),
+            (self.btn_f_manual, "Manual"),
+        ]
+        for b, m in buttons:
+            is_act = m == mode
+            b.config(bg="#1e293b" if is_act else "#11141c", fg=TEXT_WHITE if is_act else TEXT_MUTED)
 
-    def _apply_fan_speed_bg(self, pct):
-        self.backend.set_fan_speed(pct)
-        time.sleep(1)
-        self.root.after(0, lambda: self.status_lbl.config(text=f"Kecepatan kipas diatur: {pct}%" if pct > 0 else "Kipas dikembalikan ke Auto (EC)."))
+        if mode == "Manual":
+            self.slider_frame.pack(fill=tk.X, pady=(4, 0))
+        else:
+            self.slider_frame.pack_forget()
 
-    # ---------------- POLLING LOOP ----------------
+        def apply_fan():
+            if mode == "Auto":
+                self.backend.set_fan_speed(0)
+            elif mode == "Silent":
+                self.backend.set_fan_speed(35)
+            elif mode == "Turbo":
+                self.backend.set_fan_speed(85)
+            elif mode == "Max":
+                self.backend.set_fan_speed(100)
+
+        threading.Thread(target=apply_fan, daemon=True).start()
+
+    def set_charge(self, limit):
+        self.charge_limit = limit
+        for b, l in [(self.btn_c60, 60), (self.btn_c80, 80), (self.btn_c100, 100)]:
+            is_act = l == limit
+            b.config(bg="#1e293b" if is_act else "#11141c", fg=TEXT_WHITE if is_act else TEXT_MUTED)
+
+    def _on_slider_change(self, val):
+        duty = int(float(val))
+        self.slider_val_lbl.config(text=f"{duty}%")
+        threading.Thread(target=lambda: self.backend.set_fan_speed(duty), daemon=True).start()
 
     def _update_loop(self):
         while self.running:
             try:
+                bat = self.backend.get_battery_telemetry()
                 c_temp = self.backend.get_cpu_temp()
                 g_temp = self.backend.get_gpu_temp()
-                cpu_rpm, gpu_rpm, mode = self.backend.get_fan_speeds()
-                is_cold = self.backend.get_cold_mode()
-                prof = self.backend.get_power_profile()
+                c_fan, g_fan, _ = self.backend.get_fan_speeds()
 
-                self.root.after(0, self._render_live_data, c_temp, g_temp, cpu_rpm, gpu_rpm, is_cold, prof)
+                def update_labels():
+                    # AC & Wattage
+                    self.ac_pill.config(
+                        text="Plugged In" if bat["is_ac"] else "On Battery",
+                        fg=ACCENT_GREEN if bat["is_ac"] else ACCENT_AMBER,
+                        bg="#064e3b" if bat["is_ac"] else "#3b1806"
+                    )
+                    self.watt_pill.config(text=f"{bat['power_w']:.1f} W")
+
+                    # Battery
+                    self.badge_charge.val_lbl.config(text=f"{bat['capacity_pct']}%")
+                    self.badge_health.val_lbl.config(text=f"{bat['health_pct']:.1f}%")
+                    self.badge_power.val_lbl.config(text=f"{bat['power_w']:.1f} W")
+                    self.badge_rem.val_lbl.config(text=bat["remaining_time"])
+                    self.badge_full.val_lbl.config(text=bat["full_runtime"])
+
+                    # Thermals
+                    self.badge_cpu_temp.val_lbl.config(text=f"{int(c_temp)}°C")
+                    self.badge_gpu_temp.val_lbl.config(text=f"{int(g_temp)}°C")
+                    self.badge_cpu_fan.val_lbl.config(text=f"{c_fan} RPM")
+                    self.badge_gpu_fan.val_lbl.config(text=f"{g_fan} RPM")
+
+                self.root.after(0, update_labels)
             except Exception:
                 pass
             time.sleep(1.5)
-
-    def _render_live_data(self, c_temp, g_temp, cpu_rpm, gpu_rpm, is_cold, prof):
-        # Update CPU badge
-        c_color = GREEN_BADGE if c_temp < 68 else (AMBER_BADGE if c_temp < 80 else RED_BADGE)
-        self.cpu_badge.config(text=f"CPU: {c_temp:.0f}°C", fg=c_color)
-
-        # Update GPU badge
-        if g_temp is not None:
-            g_color = GREEN_BADGE if g_temp < 68 else (AMBER_BADGE if g_temp < 80 else RED_BADGE)
-            self.gpu_badge.config(text=f"GPU: {g_temp:.0f}°C", fg=g_color)
-        else:
-            self.gpu_badge.config(text="GPU: Standby", fg=TEXT_MUTED)
-
-        # Update Tachometers
-        self.cpu_rpm_lbl.config(text=f"CPU Fan : {cpu_rpm} RPM")
-        self.gpu_rpm_lbl.config(text=f"GPU Fan : {gpu_rpm} RPM")
-
-        # Update Cold mode & Profile highlights
-        self._update_cold_mode_ui(is_cold)
-        self._highlight_profile(prof)
-
-def main():
-    root = tk.Tk()
-    app = TFlowApp(root)
-    root.mainloop()
-
-if __name__ == "__main__":
-    main()
-

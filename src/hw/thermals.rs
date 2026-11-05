@@ -209,7 +209,7 @@ fn read_linux_thermals() -> ThermalTelemetry {
 
 #[cfg(target_os = "windows")]
 fn read_windows_thermals() -> ThermalTelemetry {
-    ThermalTelemetry::default()
+    super::windows::read_windows_thermals()
 }
 
 pub fn set_fan_profile(profile: &str, manual_duty_pct: Option<u8>) -> Result<(), String> {
@@ -273,8 +273,13 @@ pub fn set_fan_profile(profile: &str, manual_duty_pct: Option<u8>) -> Result<(),
         }
         Ok(())
     }
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(target_os = "windows")]
     {
+        super::windows::set_windows_fan_profile(profile, manual_duty_pct)
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+    {
+        let _ = (profile, manual_duty_pct);
         Ok(())
     }
 }

@@ -146,15 +146,7 @@ fn apply_linux_power_mode(mode: PowerMode) -> Result<(), String> {
 
 #[cfg(target_os = "windows")]
 fn apply_windows_power_mode(mode: PowerMode) -> Result<(), String> {
-    let guid = match mode {
-        PowerMode::UltraSave => "a1841308-3541-4fab-bc81-f71556f20b4a", // Power Saver
-        PowerMode::Balance => "381b4222-f694-41f0-9685-ff5bb260df2e",   // Balanced
-        PowerMode::Performance => "8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c", // High Performance
-    };
-    let _ = Command::new("powercfg")
-        .args(["/setactive", guid])
-        .status();
-    Ok(())
+    super::windows::apply_windows_power_mode(mode)
 }
 
 pub fn get_current_power_mode() -> PowerMode {
@@ -187,7 +179,11 @@ pub fn get_current_power_mode() -> PowerMode {
             PowerMode::Balance
         }
     }
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(target_os = "windows")]
+    {
+        super::windows::get_windows_power_mode()
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
     {
         PowerMode::Balance
     }

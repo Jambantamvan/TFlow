@@ -36,6 +36,33 @@ class HardwareBackend:
                     self.afc_exe = alt_path
                     self.psexec_exe = r"C:\Users\abrar\AsusFanControl\PsExec.exe"
 
+    def _run_silent(self, cmd, capture_output=True, timeout=2):
+        """Execute subprocess silently without triggering any console popup windows on Windows."""
+        cflags = 0x08000000 if IS_WINDOWS else 0
+        startupinfo = None
+        if IS_WINDOWS:
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            startupinfo.wShowWindow = 0  # SW_HIDE
+        if capture_output:
+            return subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                creationflags=cflags,
+                startupinfo=startupinfo
+            )
+        else:
+            return subprocess.run(
+                cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=timeout,
+                creationflags=cflags,
+                startupinfo=startupinfo
+            )
+
     # ------------------ THERMAL TELEMETRY ------------------
 
     def get_cpu_temp(self) -> float:
@@ -52,10 +79,10 @@ class HardwareBackend:
                         pass
             return max(temps) if temps else 45.0
         else:
-            # Windows: Try AsusFanControl or WMI
+            # Windows: Try AsusFanControl silently
             try:
                 cmd = [self.afc_exe, "--get-cpu-temp"]
-                res = subprocess.run(cmd, capture_output=True, text=True, timeout=2)
+                res = self._run_silent(cmd, capture_output=True, timeout=2)
                 if res.returncode == 0 and res.stdout.strip().replace(".", "", 1).isdigit():
                     return float(res.stdout.strip())
             except Exception:
@@ -65,7 +92,7 @@ class HardwareBackend:
     def get_gpu_temp(self):
         try:
             cmd = ["nvidia-smi", "--query-gpu=temperature.gpu", "--format=csv,noheader,nounits"]
-            res = subprocess.run(cmd, capture_output=True, text=True, timeout=2)
+            res = self._run_silent(cmd, capture_output=True, timeout=2)
             if res.returncode == 0:
                 out = res.stdout.strip()
                 if out.isdigit():
@@ -97,10 +124,10 @@ class HardwareBackend:
             except Exception:
                 return "0", "0", "Auto"
         else:
-            # Windows: Query AsusFanControl
+            # Windows: Query AsusFanControl silently
             try:
                 cmd = [self.afc_exe, "--get-fan-speeds"]
-                res = subprocess.run(cmd, capture_output=True, text=True, timeout=2)
+                res = self._run_silent(cmd, capture_output=True, timeout=2)
                 speeds = [s.strip() for s in res.stdout.split(",") if s.strip().isdigit()]
                 if len(speeds) >= 2:
                     return speeds[0], speeds[1], "Auto"
@@ -118,14 +145,13 @@ class HardwareBackend:
                 subprocess.run([self.ec_tool, "setp", str(percent), "--fan", "0", "--no-verify"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 subprocess.run([self.ec_tool, "setp", str(percent), "--fan", "1", "--no-verify"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         else:
-            # Windows: Uses AsusFanControl.exe --set-fan-speeds=N
-            cflags = 0x08000000 if IS_WINDOWS else 0
+            # Windows: Uses AsusFanControl.exe --set-fan-speeds=N silently
             try:
                 cmd = [self.psexec_exe, "-accepteula", "-s", self.afc_exe, f"--set-fan-speeds={percent}"]
-                subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=cflags)
+                self._run_silent(cmd, capture_output=False)
             except Exception:
                 try:
-                    subprocess.run([self.afc_exe, f"--set-fan-speeds={percent}"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=cflags)
+                    self._run_silent([self.afc_exe, f"--set-fan-speeds={percent}"], capture_output=False)
                 except Exception:
                     pass
 
@@ -147,7 +173,7 @@ class HardwareBackend:
                     "/d", str(limit),
                     "/f"
                 ]
-                subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=0x08000000 if IS_WINDOWS else 0)
+                self._run_silent(cmd, capture_output=False)
             except Exception:
                 pass
 
@@ -167,7 +193,7 @@ class HardwareBackend:
                     r"HKLM\SOFTWARE\ASUS\ASUS System Control Interface\AsusOptimization\ASUSLink",
                     "/v", "BatteryHealthCharging"
                 ]
-                res = subprocess.run(cmd, capture_output=True, text=True, timeout=2, creationflags=0x08000000 if IS_WINDOWS else 0)
+                res = self._run_silent(cmd, capture_output=True, timeout=2)
                 if res.returncode == 0:
                     for line in res.stdout.splitlines():
                         if "BatteryHealthCharging" in line:
@@ -317,9 +343,9 @@ class HardwareBackend:
                 boost_idx = "4" # Dynamic Boost
 
             try:
-                subprocess.run(["powercfg", "/setactive", scheme], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=cflags)
-                subprocess.run(["powercfg", "/setacvalueindex", "SCHEME_CURRENT", guid_sub, guid_setting, boost_idx], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=cflags)
-                subprocess.run(["powercfg", "/setactive", "SCHEME_CURRENT"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=cflags)
+                self._run_silent(["powercfg", "/setactive", scheme], capture_output=False)
+                self._run_silent(["powercfg", "/setacvalueindex", "SCHEME_CURRENT", guid_sub, guid_setting, boost_idx], capture_output=False)
+                self._run_silent(["powercfg", "/setactive", "SCHEME_CURRENT"], capture_output=False)
             except Exception:
                 pass
 
@@ -335,8 +361,7 @@ class HardwareBackend:
                 return "Balance"
         else:
             try:
-                cflags = 0x08000000 if IS_WINDOWS else 0
-                res = subprocess.run(["powercfg", "/getactivescheme"], capture_output=True, text=True, timeout=2, creationflags=cflags)
+                res = self._run_silent(["powercfg", "/getactivescheme"])
                 out = res.stdout.lower()
                 if "a1841308" in out:
                     return "UltraSave"

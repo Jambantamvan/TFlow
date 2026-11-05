@@ -1,0 +1,22 @@
+version: '3.8'
+
+services:
+  tflow:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: tflow:latest
+    container_name: tflow
+    network_mode: host
+    privileged: true
+    environment:
+      - DISPLAY=${DISPLAY}
+      - XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR}
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - /sys:/sys:rw
+      - /proc:/proc:rw
+      - /dev/port:/dev/port:rw
+    devices:
+      - /dev/port:/dev/port
+    restart: unless-stopped

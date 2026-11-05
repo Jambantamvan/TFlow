@@ -1,0 +1,9 @@
+# TUF Control Center Dependencies
+# This project intentionally uses standard library modules (tkinter)
+# for zero-dependency portability across Linux and Windows.
+#
+# On Linux, ensure Tkinter is installed via system package manager:
+#   Ubuntu/Debian: sudo apt install python3-tk
+#   Arch/CachyOS:  sudo pacman -S tk
+#   Fedora:        sudo dnf install python3-tkinter
+

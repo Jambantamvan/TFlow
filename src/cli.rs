@@ -6,7 +6,7 @@ use crate::hw::thermals::{read_thermals, set_fan_profile};
 #[derive(Parser, Debug)]
 #[command(
     name = "tflow",
-    version = "2.0.0",
+    version = "2.1.0",
     about = "TFlow: Hardware, Power, and Battery Telemetry Center for ASUS Gaming Laptops"
 )]
 pub struct CliArgs {
@@ -88,7 +88,7 @@ pub fn print_telemetry_table() {
     let current_mode = get_current_power_mode();
 
     println!("============================================================");
-    println!("  TFlow v2.0.0 - Hardware & Power Telemetry Dashboard");
+    println!("  TFlow v2.1.0 - Hardware & Power Telemetry Dashboard");
     println!("============================================================");
     println!("  Power & Battery Subsystem:");
     println!("    Active Profile      : {}", current_mode.as_str());

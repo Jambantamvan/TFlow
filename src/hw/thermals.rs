@@ -228,6 +228,7 @@ fn read_linux_thermals() -> ThermalTelemetry {
     let duty_str = pwm_path
         .and_then(|p| fs::read_to_string(p).ok())
         .unwrap_or_default();
+    let duty_num = duty_str.trim().parse::<u8>().unwrap_or(0);
 
     let pwm_enable_str = get_asus_hwmon_dir()
         .and_then(|h| fs::read_to_string(h.join("pwm1_enable")).ok())
@@ -235,8 +236,12 @@ fn read_linux_thermals() -> ThermalTelemetry {
     let pwm_enable_is_manual = pwm_enable_str.trim() == "1";
 
     let fan_mode = if ec_mode_is_manual || pwm_enable_is_manual {
-        if duty_str.trim() == "255" {
+        if duty_num >= 240 {
             "Max".to_string()
+        } else if duty_num <= 75 && boost == "2" {
+            "Silent".to_string()
+        } else if duty_num >= 190 && duty_num <= 220 && boost == "1" {
+            "Turbo".to_string()
         } else {
             "Manual".to_string()
         }
@@ -286,14 +291,20 @@ pub fn set_fan_profile(profile: &str, manual_duty_pct: Option<u8>) -> Result<(),
                 let _ = Command::new(ec_tool).args(["set", "-1"]).output();
             }
             "silent" | "quiet" | "eco" => {
-                if let Some(p) = pwm_enable_path { let _ = fs::write(p, "2"); }
+                // Whisper-quiet mode: clamp fans to 25% (~1500 RPM)
+                if let Some(p) = pwm_enable_path { let _ = fs::write(p, "1"); }
+                if let Some(p) = pwm_path { let _ = fs::write(p, "64"); }
                 let _ = fs::write(boost_path, "2"); // 2 is Silent fan boost
-                let _ = Command::new(ec_tool).args(["set", "-1"]).output();
+                let _ = Command::new(ec_tool).args(["setp", "25", "--fan", "0", "--no-verify"]).output();
+                let _ = Command::new(ec_tool).args(["setp", "25", "--fan", "1", "--no-verify"]).output();
             }
             "turbo" | "performance" => {
-                if let Some(p) = pwm_enable_path { let _ = fs::write(p, "2"); }
+                // High-performance thermal boost: clamp fans to 80% (~3600 RPM)
+                if let Some(p) = pwm_enable_path { let _ = fs::write(p, "1"); }
+                if let Some(p) = pwm_path { let _ = fs::write(p, "204"); }
                 let _ = fs::write(boost_path, "1"); // 1 is Overboost fan boost
-                let _ = Command::new(ec_tool).args(["set", "-1"]).output();
+                let _ = Command::new(ec_tool).args(["setp", "80", "--fan", "0", "--no-verify"]).output();
+                let _ = Command::new(ec_tool).args(["setp", "80", "--fan", "1", "--no-verify"]).output();
             }
             "max" | "100" | "100% max" => {
                 // High-performance fan overdrive without altering CPU power policy
@@ -310,6 +321,10 @@ pub fn set_fan_profile(profile: &str, manual_duty_pct: Option<u8>) -> Result<(),
                 if let Some(p) = pwm_path { let _ = fs::write(p, raw_pwm.to_string()); }
                 if duty_pct >= 85 {
                     let _ = fs::write(boost_path, "1");
+                } else if duty_pct <= 35 {
+                    let _ = fs::write(boost_path, "2");
+                } else {
+                    let _ = fs::write(boost_path, "0");
                 }
                 let _ = Command::new(ec_tool).args(["setp", &duty_pct.to_string(), "--fan", "0", "--no-verify"]).output();
                 let _ = Command::new(ec_tool).args(["setp", &duty_pct.to_string(), "--fan", "1", "--no-verify"]).output();

@@ -1,6 +1,6 @@
 [package]
 name = "tflow"
-version = "2.0.0"
+version = "2.1.0"
 edition = "2021"
 authors = ["Jambantamvan <Jambantamvan@users.noreply.github.com>"]
 description = "High-performance hardware, power, thermal, and battery management center for ASUS TUF gaming laptops"

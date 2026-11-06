@@ -218,9 +218,9 @@ fn read_linux_thermals() -> ThermalTelemetry {
         gpu_fan_rpm = cpu_fan_rpm;
     }
 
-    // Read current thermal policy:
-    // TUF FX506: 0 = Balanced, 1 = Turbo, 2 = Silent
-    let policy = fs::read_to_string("/sys/devices/platform/asus-nb-wmi/throttle_thermal_policy")
+    // Read current ASUS fan boost mode:
+    // TUF FX506: 0 = Normal, 1 = Overboost, 2 = Silent
+    let boost = fs::read_to_string("/sys/devices/platform/asus-nb-wmi/fan_boost_mode")
         .map(|s| s.trim().to_string())
         .unwrap_or_else(|_| "0".to_string());
 
@@ -241,10 +241,10 @@ fn read_linux_thermals() -> ThermalTelemetry {
             "Manual".to_string()
         }
     } else {
-        match policy.as_str() {
-            "2" => "Silent".to_string(), // TUF: 2 is Silent
-            "1" => "Turbo".to_string(),  // TUF: 1 is Turbo/Overboost
-            _ => "Auto".to_string(),     // TUF: 0 is Auto/Balanced
+        match boost.as_str() {
+            "2" => "Silent".to_string(), // TUF: 2 is Silent fan boost
+            "1" => "Turbo".to_string(),  // TUF: 1 is Overboost fan boost
+            _ => "Auto".to_string(),     // TUF: 0 is Normal/Auto fan boost
         }
     };
 
@@ -273,7 +273,6 @@ fn read_windows_thermals() -> ThermalTelemetry {
 pub fn set_fan_profile(profile: &str, manual_duty_pct: Option<u8>) -> Result<(), String> {
     #[cfg(target_os = "linux")]
     {
-        let policy_path = "/sys/devices/platform/asus-nb-wmi/throttle_thermal_policy";
         let boost_path = "/sys/devices/platform/asus-nb-wmi/fan_boost_mode";
         let hwmon_dir = get_asus_hwmon_dir();
         let pwm_enable_path = hwmon_dir.as_ref().map(|h| h.join("pwm1_enable"));
@@ -283,29 +282,22 @@ pub fn set_fan_profile(profile: &str, manual_duty_pct: Option<u8>) -> Result<(),
         match profile.to_lowercase().as_str() {
             "auto" | "default" | "balance" => {
                 if let Some(p) = pwm_enable_path { let _ = fs::write(p, "2"); }
-                let _ = fs::write(policy_path, "0");
                 let _ = fs::write(boost_path, "0");
-                let _ = Command::new("asusctl").args(["profile", "set", "Balanced"]).output();
                 let _ = Command::new(ec_tool).args(["set", "-1"]).output();
             }
             "silent" | "quiet" | "eco" => {
                 if let Some(p) = pwm_enable_path { let _ = fs::write(p, "2"); }
-                let _ = fs::write(policy_path, "2"); // 2 is Silent on TUF
-                let _ = fs::write(boost_path, "2");
-                let _ = Command::new("asusctl").args(["profile", "set", "Quiet"]).output();
+                let _ = fs::write(boost_path, "2"); // 2 is Silent fan boost
                 let _ = Command::new(ec_tool).args(["set", "-1"]).output();
             }
             "turbo" | "performance" => {
                 if let Some(p) = pwm_enable_path { let _ = fs::write(p, "2"); }
-                let _ = fs::write(policy_path, "1"); // 1 is Turbo on TUF
-                let _ = fs::write(boost_path, "1");
-                let _ = Command::new("asusctl").args(["profile", "set", "Performance"]).output();
+                let _ = fs::write(boost_path, "1"); // 1 is Overboost fan boost
                 let _ = Command::new(ec_tool).args(["set", "-1"]).output();
             }
             "max" | "100" | "100% max" => {
+                // High-performance fan overdrive without altering CPU power policy
                 let _ = fs::write(boost_path, "1");
-                let _ = fs::write(policy_path, "1");
-                let _ = Command::new("asusctl").args(["profile", "set", "Performance"]).output();
                 if let Some(p) = pwm_enable_path { let _ = fs::write(p, "1"); }
                 if let Some(p) = pwm_path { let _ = fs::write(p, "255"); }
                 let _ = Command::new(ec_tool).args(["setp", "100", "--fan", "0", "--no-verify"]).output();
@@ -318,7 +310,6 @@ pub fn set_fan_profile(profile: &str, manual_duty_pct: Option<u8>) -> Result<(),
                 if let Some(p) = pwm_path { let _ = fs::write(p, raw_pwm.to_string()); }
                 if duty_pct >= 85 {
                     let _ = fs::write(boost_path, "1");
-                    let _ = fs::write(policy_path, "1");
                 }
                 let _ = Command::new(ec_tool).args(["setp", &duty_pct.to_string(), "--fan", "0", "--no-verify"]).output();
                 let _ = Command::new(ec_tool).args(["setp", &duty_pct.to_string(), "--fan", "1", "--no-verify"]).output();

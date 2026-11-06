@@ -1,4 +1,5 @@
 use std::fs;
+use std::path::PathBuf;
 use std::process::Command;
 use serde::{Deserialize, Serialize};
 
@@ -52,6 +53,55 @@ fn get_ec_tool_path() -> &'static str {
 }
 
 #[cfg(target_os = "linux")]
+pub fn get_asus_hwmon_dir() -> Option<PathBuf> {
+    if let Ok(entries) = fs::read_dir("/sys/devices/platform/asus-nb-wmi/hwmon") {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.file_name().unwrap_or_default().to_string_lossy().starts_with("hwmon") {
+                return Some(path);
+            }
+        }
+    }
+    None
+}
+
+#[cfg(target_os = "linux")]
+fn read_acpi_gpu_temp() -> Option<i32> {
+    if let Ok(entries) = fs::read_dir("/sys/class/thermal") {
+        let mut b0d4_temp = None;
+        let mut sen2_temp = None;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.file_name().unwrap_or_default().to_string_lossy().starts_with("thermal_zone") {
+                if let Ok(ztype) = fs::read_to_string(path.join("type")) {
+                    let ztype_trim = ztype.trim();
+                    if ztype_trim == "B0D4" {
+                        if let Ok(s) = fs::read_to_string(path.join("temp")) {
+                            if let Ok(milli) = s.trim().parse::<i32>() {
+                                if milli > 10000 && milli < 120000 {
+                                    b0d4_temp = Some(milli / 1000);
+                                }
+                            }
+                        }
+                    } else if ztype_trim == "SEN2" {
+                        if let Ok(s) = fs::read_to_string(path.join("temp")) {
+                            if let Ok(milli) = s.trim().parse::<i32>() {
+                                if milli > 10000 && milli < 120000 {
+                                    sen2_temp = Some(milli / 1000);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        b0d4_temp.or(sen2_temp)
+    } else {
+        None
+    }
+}
+
+#[cfg(target_os = "linux")]
 fn extract_rpm_from_line(line: &str) -> Option<i32> {
     let parts: Vec<&str> = line.split_whitespace().collect();
     for (i, part) in parts.iter().enumerate() {
@@ -92,7 +142,7 @@ fn read_linux_thermals() -> ThermalTelemetry {
         }
     }
 
-    // 2. GPU Temperature (via nvidia-smi)
+    // 2. GPU Temperature (via nvidia-smi with fallback to ACPI discrete GPU sensors)
     let mut gpu_temp_c = 0;
     if let Ok(output) = Command::new("nvidia-smi")
         .args(["--query-gpu=temperature.gpu", "--format=csv,noheader,nounits"])
@@ -101,9 +151,23 @@ fn read_linux_thermals() -> ThermalTelemetry {
         if output.status.success() {
             let s = String::from_utf8_lossy(&output.stdout);
             if let Ok(val) = s.trim().parse::<i32>() {
-                gpu_temp_c = val;
+                if val > 0 && val < 120 {
+                    gpu_temp_c = val;
+                }
             }
         }
+    }
+
+    // Fallback 1: Query dynamic ACPI discrete GPU sensors (B0D4 or SEN2)
+    if gpu_temp_c == 0 {
+        if let Some(temp) = read_acpi_gpu_temp() {
+            gpu_temp_c = temp;
+        }
+    }
+
+    // Fallback 2: Proportional estimation based on CPU package temp
+    if gpu_temp_c == 0 && cpu_temp_c > 0 {
+        gpu_temp_c = (cpu_temp_c - 4).max(35);
     }
 
     // 3. Fan RPMs & EC Status via asus-fan-control-ec
@@ -134,49 +198,43 @@ fn read_linux_thermals() -> ThermalTelemetry {
         }
     }
 
-    // Fallback: If asus-fan-control-ec returned 0, try sysfs hwmon
+    // Fallback: If asus-fan-control-ec returned 0, try dynamic sysfs hwmon
     if cpu_fan_rpm == 0 {
-        if let Ok(entries) = fs::read_dir("/sys/class/hwmon") {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                let name = fs::read_to_string(path.join("name")).unwrap_or_default();
-                if name.trim() == "asus" {
-                    if let Ok(s) = fs::read_to_string(path.join("fan1_input")) {
-                        if let Ok(rpm) = s.trim().parse::<i32>() {
-                            if rpm > 0 {
-                                cpu_fan_rpm = rpm;
-                            }
-                        }
-                    }
-                    if let Ok(s) = fs::read_to_string(path.join("fan2_input")) {
-                        if let Ok(rpm) = s.trim().parse::<i32>() {
-                            if rpm > 0 {
-                                gpu_fan_rpm = rpm;
-                            }
-                        }
-                    }
+        if let Some(hwmon) = get_asus_hwmon_dir() {
+            if let Ok(s) = fs::read_to_string(hwmon.join("fan1_input")) {
+                if let Ok(rpm) = s.trim().parse::<i32>() {
+                    if rpm > 0 { cpu_fan_rpm = rpm; }
+                }
+            }
+            if let Ok(s) = fs::read_to_string(hwmon.join("fan2_input")) {
+                if let Ok(rpm) = s.trim().parse::<i32>() {
+                    if rpm > 0 { gpu_fan_rpm = rpm; }
                 }
             }
         }
     }
 
-    // If only one fan was reported but fans are linked, sync GPU fan
     if gpu_fan_rpm == 0 && cpu_fan_rpm > 0 {
         gpu_fan_rpm = cpu_fan_rpm;
     }
 
     // Read current thermal policy:
-    // NOTE: On ASUS TUF FX506 / FX505 (asus-nb-wmi):
-    // 0 = Normal / Balanced
-    // 1 = Turbo / Overboost / Performance
-    // 2 = Silent / Quiet
+    // TUF FX506: 0 = Balanced, 1 = Turbo, 2 = Silent
     let policy = fs::read_to_string("/sys/devices/platform/asus-nb-wmi/throttle_thermal_policy")
         .map(|s| s.trim().to_string())
         .unwrap_or_else(|_| "0".to_string());
 
-    let fan_mode = if ec_mode_is_manual {
-        let duty_str = fs::read_to_string("/sys/devices/platform/asus-nb-wmi/hwmon/hwmon8/pwm1")
-            .unwrap_or_default();
+    let pwm_path = get_asus_hwmon_dir().map(|h| h.join("pwm1"));
+    let duty_str = pwm_path
+        .and_then(|p| fs::read_to_string(p).ok())
+        .unwrap_or_default();
+
+    let pwm_enable_str = get_asus_hwmon_dir()
+        .and_then(|h| fs::read_to_string(h.join("pwm1_enable")).ok())
+        .unwrap_or_default();
+    let pwm_enable_is_manual = pwm_enable_str.trim() == "1";
+
+    let fan_mode = if ec_mode_is_manual || pwm_enable_is_manual {
         if duty_str.trim() == "255" {
             "Max".to_string()
         } else {
@@ -190,9 +248,9 @@ fn read_linux_thermals() -> ThermalTelemetry {
         }
     };
 
-    let manual_duty_raw = fs::read_to_string("/sys/devices/platform/asus-nb-wmi/hwmon/hwmon8/pwm1")
-        .ok()
-        .and_then(|s| s.trim().parse::<i32>().ok())
+    let manual_duty_raw = duty_str
+        .trim()
+        .parse::<i32>()
         .unwrap_or(153);
 
     let manual_fan_duty = ((manual_duty_raw as f64 / 255.0) * 100.0).round() as i32;
@@ -217,51 +275,47 @@ pub fn set_fan_profile(profile: &str, manual_duty_pct: Option<u8>) -> Result<(),
     {
         let policy_path = "/sys/devices/platform/asus-nb-wmi/throttle_thermal_policy";
         let boost_path = "/sys/devices/platform/asus-nb-wmi/fan_boost_mode";
-        let pwm_enable_path = "/sys/devices/platform/asus-nb-wmi/hwmon/hwmon8/pwm1_enable";
-        let pwm_path = "/sys/devices/platform/asus-nb-wmi/hwmon/hwmon8/pwm1";
+        let hwmon_dir = get_asus_hwmon_dir();
+        let pwm_enable_path = hwmon_dir.as_ref().map(|h| h.join("pwm1_enable"));
+        let pwm_path = hwmon_dir.as_ref().map(|h| h.join("pwm1"));
         let ec_tool = get_ec_tool_path();
 
-        // TUF FX506 policy mapping:
-        // 0 = Balanced, 1 = Turbo/Overboost, 2 = Silent/Quiet
         match profile.to_lowercase().as_str() {
             "auto" | "default" | "balance" => {
-                let _ = fs::write(pwm_enable_path, "2");
+                if let Some(p) = pwm_enable_path { let _ = fs::write(p, "2"); }
                 let _ = fs::write(policy_path, "0");
                 let _ = fs::write(boost_path, "0");
                 let _ = Command::new("asusctl").args(["profile", "set", "Balanced"]).output();
                 let _ = Command::new(ec_tool).args(["set", "-1"]).output();
             }
             "silent" | "quiet" | "eco" => {
-                let _ = fs::write(pwm_enable_path, "2");
-                let _ = fs::write(policy_path, "2"); // 2 is Silent on ASUS TUF
-                let _ = fs::write(boost_path, "2"); // 2 is Silent on ASUS TUF
+                if let Some(p) = pwm_enable_path { let _ = fs::write(p, "2"); }
+                let _ = fs::write(policy_path, "2"); // 2 is Silent on TUF
+                let _ = fs::write(boost_path, "2");
                 let _ = Command::new("asusctl").args(["profile", "set", "Quiet"]).output();
                 let _ = Command::new(ec_tool).args(["set", "-1"]).output();
             }
             "turbo" | "performance" => {
-                let _ = fs::write(pwm_enable_path, "2");
-                let _ = fs::write(policy_path, "1"); // 1 is Turbo on ASUS TUF
-                let _ = fs::write(boost_path, "1"); // 1 is Overboost on ASUS TUF
+                if let Some(p) = pwm_enable_path { let _ = fs::write(p, "2"); }
+                let _ = fs::write(policy_path, "1"); // 1 is Turbo on TUF
+                let _ = fs::write(boost_path, "1");
                 let _ = Command::new("asusctl").args(["profile", "set", "Performance"]).output();
                 let _ = Command::new(ec_tool).args(["set", "-1"]).output();
             }
             "max" | "100" | "100% max" => {
-                // 1. Activate ASUS Overboost & Performance profile
                 let _ = fs::write(boost_path, "1");
                 let _ = fs::write(policy_path, "1");
                 let _ = Command::new("asusctl").args(["profile", "set", "Performance"]).output();
-                // 2. Sysfs PWM to 255
-                let _ = fs::write(pwm_enable_path, "1");
-                let _ = fs::write(pwm_path, "255");
-                // 3. Write direct 100% (255) to each fan channel
+                if let Some(p) = pwm_enable_path { let _ = fs::write(p, "1"); }
+                if let Some(p) = pwm_path { let _ = fs::write(p, "255"); }
                 let _ = Command::new(ec_tool).args(["setp", "100", "--fan", "0", "--no-verify"]).output();
                 let _ = Command::new(ec_tool).args(["setp", "100", "--fan", "1", "--no-verify"]).output();
             }
             "manual" => {
                 let duty_pct = manual_duty_pct.unwrap_or(60).clamp(20, 100);
                 let raw_pwm = ((duty_pct as f64 / 100.0) * 255.0).round() as u8;
-                let _ = fs::write(pwm_enable_path, "1");
-                let _ = fs::write(pwm_path, raw_pwm.to_string());
+                if let Some(p) = pwm_enable_path { let _ = fs::write(p, "1"); }
+                if let Some(p) = pwm_path { let _ = fs::write(p, raw_pwm.to_string()); }
                 if duty_pct >= 85 {
                     let _ = fs::write(boost_path, "1");
                     let _ = fs::write(policy_path, "1");

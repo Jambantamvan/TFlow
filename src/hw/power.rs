@@ -80,9 +80,9 @@ fn apply_linux_power_mode(mode: PowerMode) -> Result<(), String> {
         ),
     };
 
-    // 1. Intel RAPL Power Limits
-    let rapl_pl1 = "/sys/class/powercap/intel-rapl/intel-rapl:0/constraint_0_power_limit_uw";
-    let rapl_pl2 = "/sys/class/powercap/intel-rapl/intel-rapl:0/constraint_1_power_limit_uw";
+    // 1. Intel RAPL Power Limits (best-effort write if permissions permit)
+    let rapl_pl1 = "/sys/class/powercap/intel-rapl:0/constraint_0_power_limit_uw";
+    let rapl_pl2 = "/sys/class/powercap/intel-rapl:0/constraint_1_power_limit_uw";
     let _ = fs::write(rapl_pl1, pl1_uw.to_string());
     let _ = fs::write(rapl_pl2, pl2_uw.to_string());
 
@@ -161,19 +161,15 @@ pub fn get_current_power_mode() -> PowerMode {
             .and_then(|s| s.trim().parse::<u32>().ok())
             .unwrap_or(100);
 
-        let pl1 = fs::read_to_string("/sys/class/powercap/intel-rapl/intel-rapl:0/constraint_0_power_limit_uw")
-            .ok()
-            .and_then(|s| s.trim().parse::<u64>().ok())
-            .unwrap_or(28_000_000);
-
         let policy = fs::read_to_string("/sys/devices/platform/asus-nb-wmi/throttle_thermal_policy")
             .map(|s| s.trim().to_string())
             .unwrap_or_default();
 
-        if (turbo_disabled && max_perf <= 60) || pl1 <= 15_000_000 {
+        // On ASUS TUF FX506:
+        // 2 = Silent (UltraSave), 1 = Turbo (Performance), 0 = Balanced (Balance)
+        if policy == "2" || (turbo_disabled && max_perf <= 60) {
             PowerMode::UltraSave
-        } else if policy == "1" || pl1 >= 40_000_000 {
-            // On TUF FX506: 1 is Turbo/Overboost
+        } else if policy == "1" {
             PowerMode::Performance
         } else {
             PowerMode::Balance

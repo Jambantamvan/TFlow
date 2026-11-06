@@ -10,13 +10,32 @@ use hw::thermals::{read_thermals, set_fan_profile, ThermalTelemetry};
 use config::AppConfig;
 use slint::{ComponentHandle, SharedString};
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
-use std::time::Duration;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 slint::include_modules!();
 
 // Debounce state for manual fan slider
 static PENDING_MANUAL_DUTY: AtomicU8 = AtomicU8::new(0);
 static HAS_PENDING_DUTY: AtomicBool = AtomicBool::new(false);
+
+// Grace period after user interaction to prevent telemetry polling from snapping UI back
+static LAST_USER_ACTION: Mutex<Option<Instant>> = Mutex::new(None);
+
+fn record_user_action() {
+    if let Ok(mut guard) = LAST_USER_ACTION.lock() {
+        *guard = Some(Instant::now());
+    }
+}
+
+fn is_within_user_cooldown() -> bool {
+    if let Ok(guard) = LAST_USER_ACTION.lock() {
+        if let Some(instant) = *guard {
+            return instant.elapsed() < Duration::from_secs(3);
+        }
+    }
+    false
+}
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Default to reliable native software rendering on Linux Wayland/X11 if not explicitly set
@@ -72,6 +91,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     app.on_set_power_mode(move |mode_str| {
         if let Some(app) = app_weak.upgrade() {
             if let Some(mode) = PowerMode::from_str(&mode_str) {
+                record_user_action();
                 // Immediate UI feedback
                 app.set_power_mode(SharedString::from(mode.as_str()));
 
@@ -98,6 +118,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let app_weak = app.as_weak();
     app.on_set_charge_limit(move |limit| {
         if let Some(app) = app_weak.upgrade() {
+            record_user_action();
             app.set_charge_limit(limit);
             std::thread::spawn(move || {
                 let _ = set_charge_limit(limit as u32);
@@ -111,6 +132,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let app_weak = app.as_weak();
     app.on_set_fan_mode(move |mode_str| {
         if let Some(app) = app_weak.upgrade() {
+            record_user_action();
             // Immediate UI feedback
             app.set_fan_mode(SharedString::from(mode_str.clone()));
 
@@ -127,6 +149,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let app_weak = app.as_weak();
     app.on_set_manual_duty(move |duty| {
         if let Some(app) = app_weak.upgrade() {
+            record_user_action();
             let duty_u8 = duty.clamp(20.0, 100.0) as u8;
             // Immediate UI feedback on slider & duty text
             app.set_manual_fan_duty(duty);
@@ -179,8 +202,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn sync_ui_telemetry(app: &AppWindow, bat: &BatteryTelemetry, therm: &ThermalTelemetry, mode: PowerMode) {
-    // Mode
-    app.set_power_mode(SharedString::from(mode.as_str()));
+    // Only synchronize mode & fan if outside user interaction grace period
+    if !is_within_user_cooldown() {
+        app.set_power_mode(SharedString::from(mode.as_str()));
+
+        // Only update fan mode if not currently dragging in manual mode
+        if !HAS_PENDING_DUTY.load(Ordering::Relaxed) {
+            app.set_fan_mode(SharedString::from(&therm.fan_mode));
+            app.set_manual_fan_duty(therm.manual_fan_duty as f32);
+        }
+    }
 
     // AC status & wattage
     app.set_is_ac_online(bat.ac_connected);
@@ -217,10 +248,4 @@ fn sync_ui_telemetry(app: &AppWindow, bat: &BatteryTelemetry, therm: &ThermalTel
     app.set_gpu_temp(SharedString::from(format!("{}°C", therm.gpu_temp_c)));
     app.set_cpu_fan(SharedString::from(format!("{} RPM", therm.cpu_fan_rpm)));
     app.set_gpu_fan(SharedString::from(format!("{} RPM", therm.gpu_fan_rpm)));
-
-    // Only update fan mode if not currently dragging in manual mode
-    if !HAS_PENDING_DUTY.load(Ordering::Relaxed) {
-        app.set_fan_mode(SharedString::from(&therm.fan_mode));
-        app.set_manual_fan_duty(therm.manual_fan_duty as f32);
-    }
 }
